@@ -4,7 +4,7 @@
 //   ① 「一键带我去开店」点了之后，**先记下待办的 tour**，再跳申请页；申请页 DOM 渲染完才开导览。
 //      待办存 sessionStorage（刷新 / 登录跳转都还在），TTL 15 分钟（评审 P1-4：5 → 15）。
 //   ② 商品发布 / 秒杀报名改成**多步路径引导**：一个 flow 横跨「当前页 → 个人中心 → 发布页」，
-//      每一步只高亮当前页上的一个入口；用户点 driver 的「下一步」才真正 `router.push`。
+//      每一步只高亮当前页上的一个入口；用户点 `.tour-bar` 的「下一步」才真正 `router.push`。
 //      flow 进度同样存 sessionStorage（`FLOW_KEY`，TTL 10 分钟），路由变化后由调用方
 //      （ChatWidget 的 route watcher / 目标页 onMounted）调 `resumeTourFlow()` 续跑。
 //   ③ `waitForElement` 不只看「查询到没有」，还要**看得见**（P1-1）：
@@ -14,14 +14,17 @@
 // ⚠️ driver.js 走**动态 import**：不打进首屏 chunk，聊天球打开 / 点按钮时才拉。
 //
 // ⚠️ 「下一步」的两种走法都要照顾：
-//   · 用户点 popover 的「下一步」⇒ 我们写下一索引 + `destroy()` + `router.push()`；
+//   · 用户点 `.tour-bar` 的「下一步」⇒ 我们写下一索引 + `destroy()` + `router.push()`；
 //   · 用户**直接点被高亮的入口**（2026-10-22 自动推进）⇒ 给该元素挂一次性 click 监听，
 //     路由真的变了才销毁 driver、把索引推到下一步；新页的 watcher 调 `resumeTourFlow()`
 //     时发现「旧页的 driver 还活着」会先销毁它再开下一步（见 `staleDriver`）。
 //     点击元素不是链接（如文件选择框）时，1.2 秒内没换页就什么都不做，漫游继续。
 //
-// ⚠️ 具身飞行（2026-10-22）：每一步先把右下角的小助手「飞」到目标上方 0.8 秒，
-//     飞行期间**不 drive()** —— 所以不会出现「遮罩先盖住整页、小助手瞬移」的观感。
+// ⚠️ 具身飞行（2026-10-22 重构）：飞的就是**右下角原本那颗悬浮球**（`.chat-root .ball`），
+//     不再新建 `.tour-sprite`。每步先抬 z-index、0.8s `transform` 滑到目标左侧，
+//     飞行期间**不 drive()**（没有遮罩），落地后才压暗整页；结束 / 跳过时清 transform，
+//     同一颗球滑回右下角。driver 自己的 popover 已在 ChatWidget 的全局样式里隐藏，
+//     文案与【上一步 / 下一步 / 跳过】由 `.tour-bar` 承担。
 import { nextTick } from 'vue'
 import { getRole, isLoggedIn } from '../api/auth'
 import { buildNavSteps, navNode, normalizeNavPath } from '../config/navGraph'
@@ -49,6 +52,8 @@ export const SECKILL_TOUR_ID = 'seckill-tour'
 /** 新流程 id（`startTourFlow` / ChatWidget 用）。 */
 export const PUBLISH_FLOW_ID = 'publish'
 export const SECKILL_FLOW_ID = 'seckill'
+/** 开店漫游（运行时流程，见 `startOpenStoreTour`）。 */
+export const OPEN_STORE_FLOW_ID = 'open-store'
 
 export function isMerchantRole() {
   return String(getRole() || '') === '2'
@@ -308,17 +313,26 @@ function readTourFlow() {
 }
 
 export function clearTourFlow() {
+  let flow = null
   try {
     const raw = sessionStorage.getItem(FLOW_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      if (parsed && parsed.flowId) runtimeFlows.delete(parsed.flowId)
+      if (parsed && parsed.flowId) {
+        flow = runtimeFlows.get(parsed.flowId) || null
+        runtimeFlows.delete(parsed.flowId)
+      }
     }
   } catch (e) { /* 存档坏了 ⇒ 下面照删 */ }
   try {
     sessionStorage.removeItem(FLOW_KEY)
   } catch (e) { /* 无存储可用 ⇒ 本来也没有流程 */ }
-  hideSprite()
+  // 让同一颗悬浮球滑回右下角（工具栏一并收起）。
+  restoreBall()
+  // 运行时流程（开店 / NavGraph 寻路）的结束回调：ChatWidget 用它复位「漫游中」状态。
+  try {
+    flow?.onDone?.()
+  } catch (e) { /* 回调是调用方的事，别让它把清理链打断 */ }
 }
 
 /** 这一步是否属于当前页。 */
@@ -354,17 +368,26 @@ let handoff = false
 let activePath = ''
 let resumeToken = 0
 
-// ── 具身飞行精灵（模块三） ───────────────────────────────────────────────────
+// ── 飞行精灵：直接复用右下角的客服悬浮球（2026-10-22 重构） ────────────────
+//
+// 不再新建任何飞行 DOM：飞的就是 `.chat-root .ball` 这一颗绿球。
+// · 原位 = `transform` 归零时量到的一帧坐标；飞行只改 transform，不动 right/bottom；
+// · 结束时清掉 transform ⇒ 同一颗球平滑飞回右下角，不存在「分身」或画风突变；
+// · 飞行期间 `.chat-root` 抬到 10002（盖过 driver 遮罩），球本身 pointer-events:none。
 
-const SPRITE_CLASS = 'tour-sprite'
-/** 飞行时长：与 ChatWidget 里 `.tour-sprite` 的 transition 必须一致。 */
+const BALL_SELECTOR = '.chat-root .ball'
+const CHAT_ROOT_SELECTOR = '.chat-root'
+const BALL_SIZE = 56
+/** 飞行时长：与工具栏 / 探针的等待必须一致（0.8s ease-out）。 */
 const FLIGHT_MS = 800
 /** 点了高亮元素但这段时间内路由没变 ⇒ 当作普通点击（文件选择框 / 页内展开），不推进。 */
 const CLICK_NAV_WAIT_MS = 1200
 
-let sprite = null
-let spriteX = 0
-let spriteY = 0
+let ball = null
+/** 球未位移时的视口坐标。每次漫游开始时重测，结束飞回后清空。 */
+let ballBase = null
+/** 本次落点（工具栏据此贴到球旁边）。 */
+let landing = { x: 0, y: 0 }
 let flightToken = 0
 let clickToken = 0
 let activeStepEl = null
@@ -372,89 +395,224 @@ let activeStepClick = null
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-function spriteHome() {
-  return {
-    x: Math.max(16, (window.innerWidth || 0) - 96),
-    y: Math.max(16, (window.innerHeight || 0) - 96),
-  }
-}
-
 function prefersReducedMotion() {
   return typeof window !== 'undefined'
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
-/** 创建（或复用）固定定位的小助手。样式在 ChatWidget.vue 的全局段（`.tour-sprite`）。 */
-function ensureSprite() {
+function ensureBall() {
   if (typeof document === 'undefined') return null
-  if (sprite && sprite.isConnected) return sprite
-  sprite = document.createElement('div')
-  sprite.className = SPRITE_CLASS
-  sprite.setAttribute('aria-hidden', 'true')
-  sprite.textContent = '🤖'
-  const home = spriteHome()
-  spriteX = home.x
-  spriteY = home.y
-  sprite.style.transform = `translate3d(${spriteX}px, ${spriteY}px, 0)`
-  document.body.appendChild(sprite)
-  return sprite
+  if (ball && ball.isConnected) return ball
+  ball = document.querySelector(BALL_SELECTOR)
+  return ball
 }
 
-function hideSprite() {
-  // 让正在进行中的飞行作废：它醒来时 token 已变，不会再打开高亮。
-  flightToken += 1
-  if (!sprite) return
-  sprite.classList.remove('is-visible')
-  sprite.dataset.flightMs = '0'
-  // 归位在透明状态下做：下一轮漫游仍从右下角起飞，而不是从上次的落点。
-  sprite.style.transition = 'none'
-  const home = spriteHome()
-  spriteX = home.x
-  spriteY = home.y
-  sprite.style.transform = `translate3d(${spriteX}px, ${spriteY}px, 0)`
-  void sprite.offsetWidth
-  sprite.style.transition = ''
+/** 漫游态：抬高整个 `.chat-root`（它自己的 z-index 才能盖过 driver 遮罩）。 */
+function setTourMode(on) {
+  const root = document.querySelector(CHAT_ROOT_SELECTOR)
+  if (root) root.classList.toggle('tour-mode', !!on)
 }
 
 /**
- * 让精灵从当前位置滑到目标元素上方 60px（0.8s ease-in-out）。
+ * 记下球的「原位」。必须在 transform 归零时量 —— 否则拿到的是上一次落点。
+ * 量完立刻恢复原来的 transform，避免肉眼可见的一帧回跳。
+ */
+function measureBallBase(sp) {
+  if (ballBase) return ballBase
+  const prev = sp.style.transform
+  sp.style.transition = 'none'
+  sp.style.transform = ''
+  void sp.offsetWidth
+  const rect = sp.getBoundingClientRect()
+  ballBase = { x: rect.left, y: rect.top }
+  sp.style.transform = prev
+  void sp.offsetWidth
+  sp.style.transition = ''
+  return ballBase
+}
+
+/**
+ * 让**原本的悬浮球**滑到目标左侧（球右边缘与目标间距 12px，约等于「左侧 60px」）；
+ * 左边放不下就落到右侧，两侧都放不下才落到目标上方。0.8s ease-out。
  *
  * @returns {Promise<boolean>} false = 目标在飞行途中消失，或这次飞行已被更新的调用取代
  */
 async function flyTo(el) {
-  const sp = ensureSprite()
+  const sp = ensureBall()
   if (!sp) return true
   const token = ++flightToken
-  const fromX = spriteX
-  const fromY = spriteY
+  setTourMode(true)
+  measureBallBase(sp)
+  hideTourBar()
 
-  // 先把目标滚进视口再量 —— 表单后半段的锚点初始可能在屏幕外，
-  // 不滚的话精灵会飞到窗口外面去。
+  // 先把目标滚进视口再量 —— 表单后半段的锚点初始可能在屏幕外。
   try {
     el.scrollIntoView({ block: 'center', inline: 'nearest' })
   } catch (e) { /* 平滑滚动不被支持时，量到的 rect 仍然可用 */ }
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-  if (!el.isConnected || token !== flightToken) return false
+  if (!el || !el.isConnected || token !== flightToken) return false
 
   const rect = el.getBoundingClientRect()
-  const x = Math.max(8, Math.min(rect.left, (window.innerWidth || 0) - 56))
-  const y = Math.max(8, rect.top - 60)
+  const vw = window.innerWidth || 0
+  const vh = window.innerHeight || 0
+  // 首选目标左侧（球右边缘留 12px）；左边放不下就试右侧（左边距时的对称解），
+  // 两侧都放不下（整宽区块）才落到目标上方。
+  let x = rect.left - 12 - BALL_SIZE
+  let y = rect.top + Math.max(0, Math.min((rect.height - BALL_SIZE) / 2, 24))
+  if (x < 8) {
+    const right = rect.right + 12
+    if (right + BALL_SIZE <= vw - 8) {
+      x = right
+    } else {
+      x = rect.left
+      y = rect.top - BALL_SIZE - 8
+    }
+  }
+  x = Math.max(8, Math.min(x, vw - BALL_SIZE - 8))
+  y = Math.max(8, Math.min(y, vh - BALL_SIZE - 8))
 
-  sp.dataset.flightFrom = `${Math.round(fromX)},${Math.round(fromY)}`
+  const from = sp.getBoundingClientRect()
+  sp.dataset.flightFrom = `${Math.round(from.left)},${Math.round(from.top)}`
   sp.dataset.flightTo = `${Math.round(x)},${Math.round(y)}`
   const duration = prefersReducedMotion() ? 0 : FLIGHT_MS
   sp.dataset.flightMs = String(duration)
-  sp.classList.add('is-visible')
-  // 强制一帧：元素刚创建时没有「上一帧」可供过渡，直接改终点会瞬移。
-  void sp.offsetWidth
-  spriteX = x
-  spriteY = y
-  sp.style.transform = `translate3d(${x}px, ${y}px, 0)`
+  sp.style.transition = duration ? `transform ${duration}ms ease-out` : 'none'
+  sp.style.transform = `translate(${Math.round(x - ballBase.x)}px, ${Math.round(y - ballBase.y)}px)`
+  landing = { x, y, rect }
 
   if (duration === 0) return true
   await sleep(duration)
   return token === flightToken && el.isConnected
+}
+
+/** 漫游结束：清掉 transform，让同一颗球滑回右下角；工具栏一并收起。 */
+function restoreBall() {
+  const token = ++flightToken
+  hideTourBar()
+  const sp = ensureBall()
+  if (!sp) {
+    ballBase = null
+    setTourMode(false)
+    return
+  }
+  sp.dataset.flightMs = '0'
+  sp.style.transition = prefersReducedMotion() ? 'none' : `transform ${FLIGHT_MS}ms ease-out`
+  sp.style.transform = ''
+  const finish = () => {
+    // 期间又开了新的一段飞行 ⇒ 别把它的 transition / tour-mode 收掉。
+    if (token !== flightToken) return
+    sp.style.transition = ''
+    ballBase = null
+    setTourMode(false)
+  }
+  if (prefersReducedMotion()) finish()
+  else setTimeout(finish, FLIGHT_MS + 60)
+}
+
+// ── 漫游控制条：挂在飞过去的球旁边（driver 自带 popover 已在 CSS 里隐藏） ────
+
+const TOUR_BAR_CLASS = 'tour-bar'
+let tourBar = null
+let tourBarRefs = null
+
+function ensureTourBar() {
+  if (tourBar && tourBar.isConnected) return tourBar
+  tourBar = document.createElement('div')
+  tourBar.className = TOUR_BAR_CLASS
+  tourBar.setAttribute('role', 'dialog')
+  tourBar.setAttribute('aria-label', '漫游控制')
+
+  const head = document.createElement('div')
+  head.className = 'tour-bar-head'
+  const stepEl = document.createElement('span')
+  stepEl.className = 'tour-bar-step'
+  const skip = document.createElement('button')
+  skip.type = 'button'
+  skip.className = 'tour-bar-skip'
+  skip.textContent = '跳过'
+  head.append(stepEl, skip)
+
+  const titleEl = document.createElement('div')
+  titleEl.className = 'tour-bar-title'
+  const descEl = document.createElement('div')
+  descEl.className = 'tour-bar-desc'
+
+  const actions = document.createElement('div')
+  actions.className = 'tour-bar-actions'
+  const prev = document.createElement('button')
+  prev.type = 'button'
+  prev.className = 'tour-bar-prev'
+  prev.textContent = '上一步'
+  const next = document.createElement('button')
+  next.type = 'button'
+  next.className = 'tour-bar-next'
+  next.textContent = '下一步'
+  actions.append(prev, next)
+
+  tourBar.append(head, titleEl, descEl, actions)
+  document.body.appendChild(tourBar)
+  tourBarRefs = { stepEl, skip, titleEl, descEl, prev, next }
+  return tourBar
+}
+
+function hideTourBar() {
+  if (tourBar && tourBar.isConnected) tourBar.remove()
+  tourBar = null
+  tourBarRefs = null
+}
+
+function showTourBar(flow, index, point) {
+  const bar = ensureTourBar()
+  const { stepEl, skip, titleEl, descEl, prev, next } = tourBarRefs
+  const total = flow.steps.length
+  const step = flow.steps[index]
+  stepEl.textContent = `第 ${index + 1} 步 / 共 ${total} 步`
+  titleEl.textContent = step.title || ''
+  descEl.textContent = step.description || ''
+  prev.style.display = index > 0 ? '' : 'none'
+  next.textContent = index === total - 1 ? '完成' : '下一步'
+  prev.onclick = () => retreatFlow(flow, index)
+  next.onclick = () => advanceFlow(flow, index)
+  skip.onclick = () => {
+    // 先清流程（归档 + 球归位），再拆 driver（handoff 保证不会二次 clear）。
+    clearTourFlow()
+    destroyTourDriver()
+  }
+
+  // 贴球摆放，但**不许压住被高亮的元素** —— 否则遮罩挖出来的洞被自己的控件盖住。
+  const M = 12
+  const vw = window.innerWidth || 0
+  const vh = window.innerHeight || 0
+  const bx = point?.x ?? 0
+  const by = point?.y ?? 0
+  const target = point?.rect || null
+  const w = bar.offsetWidth || 268
+  const h = bar.offsetHeight || 170
+  const fits = (x, y) => x >= M && y >= M && x + w <= vw - M && y + h <= vh - M
+  const hitsTarget = (x, y) => !!target
+    && !(x + w <= target.left || x >= target.right || y + h <= target.top || y >= target.bottom)
+
+  const candidates = []
+  if (!target || bx + BALL_SIZE <= target.left) {
+    // 球在目标左侧（常态）：控件再往左 / 下 / 上
+    candidates.push([bx - M - w, by], [bx, by + BALL_SIZE + M], [bx, by - h - M])
+  } else if (bx >= target.right) {
+    // 球在目标右侧（左边距的对称解）
+    candidates.push([bx + BALL_SIZE + M, by], [bx, by + BALL_SIZE + M], [bx, by - h - M])
+  } else {
+    // 球在目标上方（整宽区块）
+    candidates.push([bx + BALL_SIZE + M, by], [bx, by - h - M], [bx, target.bottom + M])
+  }
+  candidates.push([bx + BALL_SIZE + M, by])
+
+  let spot = candidates.find(([x, y]) => fits(x, y) && !hitsTarget(x, y))
+    || candidates.find(([x, y]) => fits(x, y))
+    || candidates[0]
+  const left = Math.max(M, Math.min(spot[0], vw - w - M))
+  const top = Math.max(M, Math.min(spot[1], vh - h - M))
+  bar.style.left = `${Math.round(left)}px`
+  bar.style.top = `${Math.round(top)}px`
 }
 
 // ── 自动推进（模块二）：只监听当前高亮元素 ──────────────────────────────────
@@ -508,6 +666,9 @@ function watchStepClick(flow, index, el, owner) {
 
 function destroyTourDriver() {
   detachStepClick()
+  // 控件的生命周期跟着 driver 走：拆掉这一步就把按钮一起收起，
+  // 下一步落地后由 `openFlowStep` 重新画一条（按钮回调闭包里的 index 不会过期）。
+  hideTourBar()
   const d = tourDriver
   if (!d) return
   handoff = true
@@ -541,22 +702,16 @@ async function openFlowStep(flow, index) {
   // 交给下一次 `resumeTourFlow` 按新路径重新对齐，别用 dummy 元素开一个空洞的高亮。
   if (!isVisible(document.querySelector(step.element))) return null
 
-  // 先拆上一步（遮罩消失），再让精灵飞过去 —— **飞行这 0.8 秒页面上没有遮罩**，
+  // 先拆上一步（遮罩消失），再让悬浮球飞过去 —— **飞行这 0.8 秒页面上没有遮罩**，
   // 飞到位后才 drive()。顺序反过来就是「遮罩先盖上、小助手瞬移」。
   destroyTourDriver()
   const el = document.querySelector(step.element)
   const arrived = await flyTo(el)
   if (!arrived || !isVisible(el)) return null
 
-  const total = flow.steps.length
-  const last = index === total - 1
   tourDriver = driver({
-    showProgress: true,
-    progressText: `第 ${index + 1} 步 / 共 ${total} 步`,
-    nextBtnText: last ? '完成' : '下一步',
-    prevBtnText: '上一步',
-    doneBtnText: last ? '完成' : '下一步',
-    showButtons: index > 0 ? ['previous', 'next', 'close'] : ['next', 'close'],
+    // driver 只负责「压暗整页 + 挖出目标」这一层；它自带的 popover 已在 CSS 里隐藏，
+    // 文案与三个按钮全部由 `.tour-bar`（贴着飞过去的球）承担。
     allowClose: true,
     // 点遮罩不销毁：用户可能只是想点被高亮的入口（那个洞是通的），误触代价太大。
     overlayClickBehavior: 'none',
@@ -566,22 +721,17 @@ async function openFlowStep(flow, index) {
     popoverClass: POPOVER_CLASS,
     steps: [{
       element: step.element,
-      // ⚠️ driver 会把「实例内没有上一步」自动翻译成 `disableButtons:['previous']`；
-      //    本实现一次只给 driver 一个 step，但流程整体可能有上一步 ⇒ 必须显式清空。
-      popover: { title: step.title, description: step.description, disableButtons: [] },
+      popover: { title: step.title, description: step.description },
     }],
-    onNextClick: () => advanceFlow(flow, index),
-    onPrevClick: () => retreatFlow(flow, index),
-    onCloseClick: () => {
-      clearTourFlow()
-      destroyTourDriver()
-    },
+    // 没有 popover 按钮可点，但键盘 / Esc 仍可能触发 driver 自己的关闭。
     onDestroyed: () => {
       tourDriver = null
       if (!handoff) clearTourFlow()
     },
   })
   tourDriver.drive()
+  // 落地后：球旁边的控制条（上一步 / 下一步 / 跳过）。
+  showTourBar(flow, index, landing)
   // 模块二：只给**这一步高亮的那一个元素**挂一次性监听。
   watchStepClick(flow, index, el, tourDriver)
   return tourDriver
@@ -674,7 +824,7 @@ export async function resumeTourFlow(path) {
 
 /**
  * 胶囊点击入口：只决定从当前页的哪一步开始，**绝不主动换页**。
- * 换页只发生在用户点 driver 的「下一步 / 上一步」之后（见 `advanceFlow` / `retreatFlow`）。
+ * 换页只发生在用户点 `.tour-bar` 的「下一步 / 上一步」之后（见 `advanceFlow` / `retreatFlow`）。
  *
  * @param {string} flowId `PUBLISH_FLOW_ID` / `SECKILL_FLOW_ID`
  * @param {string} [path] 当前路由
@@ -805,69 +955,40 @@ export function isVisible(el) {
 }
 
 /**
- * 通用漫游：等目标页渲染 → 逐个等锚点可见 → 拉 driver.js（动态 import）→ 开。
+ * 开店漫游（申请页单页两步）。
  *
- * @param {{element:string,title:string,description:string}[]} steps 锚点与文案
- * @param {{onDone?:(ok:boolean)=>void}} [opts] 结束回调（false = 锚点没等到）
+ * 2026-10-22 重构：不再走独立 driver 实例 —— 把它注册成一条运行时流程，
+ * 复用与发布 / 秒杀 / 寻路完全相同的「悬浮球飞过去 + `.tour-bar` 控件」。
+ * `onDone` 由 `clearTourFlow` 在流程结束（完成 / 跳过 / Esc）时回调。
  */
-async function runTour(steps, { onDone } = {}) {
-  // 先等两帧：路由切换后目标页可能刚挂载（KeepAlive 激活也走这条）。
-  await nextTick()
-  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-
-  const timeout = import.meta.env.DEV ? 8000 : 3000
-  for (const step of steps) {
-    if (!(await waitForElement(step.element, timeout))) {
-      clearPendingTour()
-      onDone?.(false)
-      return null
-    }
-  }
-
-  const modules = await Promise.all([
-    import('driver.js'),
-    import('driver.js/dist/driver.css'),
-  ])
-  const { driver } = modules[0]
-
-  const tour = driver({
-    showProgress: true,
-    progressText: '第 {{current}} 步 / 共 {{total}} 步',
-    nextBtnText: '下一步',
-    prevBtnText: '上一步',
-    doneBtnText: '开始填写',
-    allowClose: true,
-    overlayColor: 'rgba(15, 23, 42, .55)',
-    stagePadding: 8,
-    stageRadius: 8,
-    popoverClass: POPOVER_CLASS,
-    steps: steps.map((s) => ({
-      element: s.element,
-      popover: { title: s.title, description: s.description },
-    })),
-    onDestroyed: () => {
-      clearPendingTour()
-      onDone?.(true)
-    },
-  })
-
-  // ⚠️ 先清再开：开着导览时路由再变（如用户点浏览器返回）不会二次启动。
-  clearPendingTour()
-  tour.drive()
-  return tour
-}
-
 export function startOpenStoreTour({ onDone } = {}) {
-  return runTour([
-    {
-      element: '#tour-shop-name',
-      title: '① 给店铺起个名字',
-      description: '这个名字会展示给买家（例如「米可数码专营店」），之后可以改。',
-    },
-    {
-      element: '#tour-submit',
-      title: '② 提交入驻申请',
-      description: '填完店铺名称和营业执照号后点这里。平台审核通过，当前账号就自动升级为商家。',
-    },
-  ], { onDone })
+  const id = OPEN_STORE_FLOW_ID
+  const onApplyPage = (p) => normalizePath(p).endsWith('/user/apply')
+  runtimeFlows.set(id, {
+    id,
+    onDone,
+    steps: [
+      {
+        element: '#tour-shop-name',
+        at: onApplyPage,
+        // 两步都在申请页内：`path` 留空 ⇒ advanceFlow 不换页，原地续跑。
+        path: '',
+        title: '① 给店铺起个名字',
+        description: '这个名字会展示给买家（例如「米可数码专营店」），之后可以改。',
+      },
+      {
+        element: '#tour-submit',
+        at: onApplyPage,
+        path: '',
+        title: '② 提交入驻申请',
+        description: '填完店铺名称和营业执照号后点这里。平台审核通过，当前账号就自动升级为商家。',
+      },
+    ],
+  })
+  // 待办已经兑现成流程本身：不清掉的话，回到申请页会被 watcher 再开一次。
+  clearPendingTour()
+  const current = normalizePath(currentTourPath())
+  writeTourFlow(id, 0)
+  activePath = current
+  return resumeTourFlow(current)
 }

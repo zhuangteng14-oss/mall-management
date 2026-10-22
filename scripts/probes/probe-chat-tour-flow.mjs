@@ -121,15 +121,15 @@ async function clickChip(text) {
   })()`)
 }
 
-const popoverShown = () => `document.querySelector('.driver-popover') && getComputedStyle(document.querySelector('.driver-popover')).display !== 'none'`
-// ⚠️ 不能写 `!${popoverShown()}`：插值后 `!` 只作用于 querySelector，后半截会拿 null 调 getComputedStyle 抛错。
-const popoverGone = `!document.querySelector('.driver-popover') || getComputedStyle(document.querySelector('.driver-popover')).display === 'none'`
+// 2026-10-22：driver 自带 popover 已隐藏，控件全部在 `.tour-bar`（贴着飞过去的悬浮球）。
+const barShown = `!!document.querySelector('.tour-bar')`
+const barGone = `!document.querySelector('.tour-bar')`
 const active = (sel) => `document.querySelector(${JSON.stringify(sel)})?.classList.contains('driver-active-element')`
-const progress = `document.querySelector('.driver-popover-progress-text')?.textContent?.trim() || ''`
+const progress = `document.querySelector('.tour-bar-step')?.textContent?.trim() || ''`
 const flowState = `sessionStorage.getItem('mall.chat.tourFlow.v1')`
 
 async function clickNext() {
-  await b.evalJS(`document.querySelector('.driver-popover-next-btn')?.click()`)
+  await b.evalJS(`document.querySelector('.tour-bar-next')?.click()`)
   await sleep(250)
 }
 
@@ -232,7 +232,7 @@ try {
   await b.shot(path.join(OUT, 'flow-07-submit.png'))
 
   await clickNext()
-  const closed = await waitFor(popoverGone, 5000)
+  const closed = await waitFor(barGone, 5000)
   ok('完成后浮层消失且流程存档清空',
     closed && !(await b.evalJS(flowState)), { closed, flow: await b.evalJS(flowState) })
 
@@ -241,7 +241,7 @@ try {
   await waitFor(`document.querySelector('#tour-publish-image')`, 8000)
   await sleep(800)
   ok('直接进发布页不触发高亮（无流程存档）',
-    !(await b.evalJS(popoverShown())) && !(await b.evalJS(active('#tour-publish-image'))))
+    !(await b.evalJS(barShown)) && !(await b.evalJS(active('#tour-publish-image'))))
 
   // ── ③ 已在发布页点同一个胶囊 ⇒ 从第 3 步（主图）开始 ────────────────────
   const clickedAgain = await clickChip('去发布商品')
@@ -251,14 +251,14 @@ try {
     { ...s8, hash: await b.evalJS(`location.hash`) })
   await b.shot(path.join(OUT, 'flow-08-resume-image.png'))
 
-  await b.evalJS(`document.querySelector('.driver-popover-prev-btn')?.click()`)
+  await b.evalJS(`document.querySelector('.tour-bar-prev')?.click()`)
   const back = await waitStep('#tour-menu-add', '第 2 步 / 共 7 步', 12000)
   ok('「上一步」跨页回到个人中心并高亮上架入口',
     back.hit && (await b.evalJS(`location.hash`)) === '#/merchant/user',
     { ...back, hash: await b.evalJS(`location.hash`) })
   await b.shot(path.join(OUT, 'flow-09-prev.png'))
-  await b.evalJS(`document.querySelector('.driver-popover-close-btn')?.click()`)
-  await sleep(300)
+  await b.evalJS(`document.querySelector('.tour-bar-skip')?.click()`)
+  await sleep(950)
 
   // ── ④ 个人中心点胶囊 ⇒ 第 1 步就是「上架商品」，不再高亮顶栏 ─────────────
   const personalClick = await clickChip('去发布商品')
@@ -267,8 +267,8 @@ try {
     personalClick && s9.hit && (await b.evalJS(`location.hash`)) === '#/merchant/user',
     { ...s9, hash: await b.evalJS(`location.hash`) })
   await b.shot(path.join(OUT, 'flow-10-personal-start.png'))
-  await b.evalJS(`document.querySelector('.driver-popover-close-btn')?.click()`)
-  await sleep(300)
+  await b.evalJS(`document.querySelector('.tour-bar-skip')?.click()`)
+  await sleep(950)
 
   // ── ⑤ 秒杀两步流（用户点胶囊后允许直接到报名页）────────────────────────
   const clickedSeckill = await clickChip('去秒杀报名')
@@ -281,7 +281,7 @@ try {
   const k2 = await waitStep('#tour-seckill-submit', '第 2 步 / 共 2 步')
   ok('秒杀：同页切到提交报名', k2.hit, k2)
   await clickNext()
-  ok('秒杀：完成后浮层消失', await waitFor(popoverGone, 5000))
+  ok('秒杀：完成后浮层消失', await waitFor(barGone, 5000))
 
   // ── ⑥ 「怎么开店」的动作按钮只去申请页，绝不能被发布流程串台 ─────────────
   await sendChat('怎么开店')
@@ -296,7 +296,7 @@ try {
   ok('「怎么开店」落入驻申请页，不会误跳发布页',
     hasAction && acted && applyHash === '#/merchant/user/apply',
     { hasAction, acted, hash: applyHash })
-  await b.evalJS(`document.querySelector('.driver-popover-close-btn')?.click()`)
+  await b.evalJS(`document.querySelector('.tour-bar-skip')?.click()`)
 
   ok('页面无未捕获异常', pageErrors.length === 0, { pageErrors })
 } catch (e) {

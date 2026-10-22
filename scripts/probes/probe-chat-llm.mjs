@@ -137,14 +137,13 @@ try {
     // 第 1 步高亮顶栏「用户中心」；换页发生在后续步骤里。
     await b.evalJS(`[...document.querySelectorAll('.chip')].find(e => e.textContent.includes('去发布商品'))?.click()`)
     const started = await waitFor(
-      `location.hash === '#/merchant' && document.querySelector('.driver-popover')
-        && (document.querySelector('.driver-popover-progress-text')?.textContent || '').includes('第 1 步 / 共 7 步')`,
+      `location.hash === '#/merchant' && (document.querySelector('.tour-bar-step')?.textContent || '').includes('第 1 步 / 共 7 步')`,
       8000,
     )
     await sleep(500)
     const step1 = await b.evalJS(`(() => ({
       hash: location.hash,
-      progress: document.querySelector('.driver-popover-progress-text')?.textContent?.trim() || '',
+      progress: document.querySelector('.tour-bar-step')?.textContent?.trim() || '',
       active: document.querySelector('#tour-entry-merchant')?.classList.contains('driver-active-element') || false,
     }))()`)
     ok('点「去发布商品」留在首页起步（第 1 步高亮用户中心，不瞬移）',

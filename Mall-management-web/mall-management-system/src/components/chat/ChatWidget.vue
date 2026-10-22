@@ -414,6 +414,12 @@ onBeforeUnmount(() => {
   0% { transform: scale(1); opacity: .5; }
   70%, 100% { transform: scale(1.55); opacity: 0; }
 }
+/* ── 漫游态：同一颗球飞出去当「具身小助手」（useTour.js 给 .chat-root 加 tour-mode） ──
+   z-index 必须盖过 driver 的遮罩（10000）：球是在「飞行 + 落地高亮」全程唯一被看到的角色。
+   飞行位置由行内 style.transform 控制；这里只管层级与可点性（按钮在 .tour-bar 里）。 */
+.chat-root.tour-mode { z-index: 10002; }
+.chat-root.tour-mode .ball { pointer-events: none; }
+
 .badge {
   position: absolute;
   top: -3px;
@@ -550,78 +556,89 @@ onBeforeUnmount(() => {
 }
 </style>
 
-<!-- driver.js 的浮层渲染在 body 下，scoped 样式够不到 ⇒ 这一段是**全局**的，
-     `popoverClass: 'chat-tour-popover'` 只在漫游时命中。 -->
+<!-- 漫游期间的 body 级 DOM（driver 遮罩 / 控制条）在 scoped 样式的作用域之外 ⇒ 这一段是**全局**的。 -->
 <style>
-/* ── 漫游小助手「飞行精灵」（useTour.js 创建，2026-10-22） ──
-   固定定位 + transform 过渡；飞行期间 driver 还没 drive()，所以页面上没有遮罩。
-   ⚠️ transition 的 .8s 必须与 useTour.js 的 FLIGHT_MS 一致（那边按这个时长等落地）。 */
-.tour-sprite {
+/* ── 彻底关掉 driver 自带的 popover（2026-10-22 用户裁决） ──
+   driver 只保留「压暗整页 + 挖出目标」；文案与【上一步 / 下一步 / 跳过】全部由
+   `.tour-bar`（贴在飞过去的悬浮球旁边）承担。display:none 而不是透明：透明元素仍会
+   吃点击、仍会被读屏念出来。 */
+.chat-tour-popover.driver-popover { display: none !important; }
+
+/* ── 漫游控制条（useTour.js 创建，2026-10-22） ──
+   `left/top` 由脚本按落点算；这里只负责长相与层级（要压在遮罩之上）。 */
+.tour-bar {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 48px;
-  height: 48px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  font-size: 24px;
-  line-height: 1;
-  background: linear-gradient(135deg, var(--brand, #3b7966), var(--brand-ink, #275e4e));
-  box-shadow: 0 10px 24px rgba(39, 94, 78, .32), 0 0 0 4px rgba(59, 121, 102, .14);
-  pointer-events: none;
-  opacity: 0;
-  z-index: 10001;
-  will-change: transform;
-  transition: transform .8s ease-in-out, opacity .18s ease;
-}
-.tour-sprite.is-visible { opacity: 1; }
-
-@media (prefers-reduced-motion: reduce) {
-  .tour-sprite { transition: opacity .18s ease; }
-}
-
-.chat-tour-popover.driver-popover {
-  background: var(--surface, #fff);
-  color: var(--ink, #1d2b26);
+  z-index: 10003;
+  width: 268px;
+  max-width: calc(100vw - 24px);
+  padding: 12px 14px 14px;
   border: 1px solid var(--line, #dde2e5);
   border-radius: var(--r3, 10px);
+  background: var(--surface, #fff);
+  color: var(--ink, #1d2b26);
   box-shadow: 0 18px 48px rgba(15, 23, 42, .18);
   font-family: inherit;
-  max-width: 320px;
 }
-.chat-tour-popover .driver-popover-title {
+.tour-bar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.tour-bar-step {
+  font-size: var(--fs-xs, 12px);
+  color: var(--muted, #67736e);
+  font-variant-numeric: tabular-nums;
+}
+.tour-bar-skip {
+  border: 0;
+  padding: 2px 4px;
+  background: transparent;
+  color: var(--muted, #67736e);
+  font: inherit;
+  font-size: var(--fs-xs, 12px);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.tour-bar-skip:hover { color: var(--ink, #1d2b26); }
+.tour-bar-title {
   font-size: var(--fs-md, 16px);
   font-weight: 600;
-  color: var(--ink, #1d2b26);
+  line-height: 1.35;
 }
-.chat-tour-popover .driver-popover-description {
-  font-size: var(--fs-sm, 15px);
+.tour-bar-desc {
+  margin-top: 4px;
+  font-size: var(--fs-sm, 14px);
   line-height: 1.6;
   color: var(--ink, #1d2b26);
   opacity: .82;
 }
-.chat-tour-popover .driver-popover-progress-text {
-  font-size: var(--fs-xs, 12px);
-  color: var(--muted, #67736e);
+.tour-bar-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
 }
-.chat-tour-popover .driver-popover-footer button {
+.tour-bar-prev,
+.tour-bar-next {
   border-radius: var(--r1, 4px);
-  text-shadow: none;
+  padding: 6px 12px;
+  font: inherit;
   font-size: var(--fs-xs, 12px);
-  padding: 5px 10px;
+  cursor: pointer;
 }
-.chat-tour-popover .driver-popover-next-btn {
-  background: var(--brand, #3b7966);
-  border: 1px solid var(--brand, #3b7966);
-  color: #fff;
-}
-.chat-tour-popover .driver-popover-prev-btn {
-  background: var(--surface, #fff);
+.tour-bar-prev {
   border: 1px solid var(--line, #dde2e5);
+  background: var(--surface, #fff);
   color: var(--brand-ink, #275e4e);
 }
-.chat-tour-popover .driver-popover-close-btn {
-  color: var(--muted, #67736e);
+.tour-bar-next {
+  border: 1px solid var(--brand, #3b7966);
+  background: var(--brand, #3b7966);
+  color: #fff;
 }
+.tour-bar-prev:hover { border-color: var(--brand, #3b7966); }
+.tour-bar-next:hover { background: var(--brand-ink, #275e4e); }
 </style>

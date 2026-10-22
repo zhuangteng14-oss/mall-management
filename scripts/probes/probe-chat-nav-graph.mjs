@@ -134,13 +134,14 @@ async function clickAction() {
   return { clicked: true, label }
 }
 
-const popoverGone = `!document.querySelector('.driver-popover') || getComputedStyle(document.querySelector('.driver-popover')).display === 'none'`
+// 2026-10-22：driver 自带 popover 已隐藏，控件全部在 `.tour-bar`（贴着飞过去的悬浮球）。
+const barGone = `!document.querySelector('.tour-bar')`
 const active = (sel) => `document.querySelector(${JSON.stringify(sel)})?.classList.contains('driver-active-element')`
-const progress = `document.querySelector('.driver-popover-progress-text')?.textContent?.trim() || ''`
-const title = `document.querySelector('.driver-popover-title')?.textContent?.trim() || ''`
+const progress = `document.querySelector('.tour-bar-step')?.textContent?.trim() || ''`
+const title = `document.querySelector('.tour-bar-title')?.textContent?.trim() || ''`
 
 async function clickNext() {
-  await b.evalJS(`document.querySelector('.driver-popover-next-btn')?.click()`)
+  await b.evalJS(`document.querySelector('.tour-bar-next')?.click()`)
   await sleep(300)
 }
 
@@ -155,9 +156,10 @@ async function waitStep(sel, progressText, timeout = 12000) {
 }
 
 async function closeTour() {
-  if (!(await b.evalJS(popoverGone))) {
-    await b.evalJS(`document.querySelector('.driver-popover-close-btn')?.click()`)
-    await sleep(300)
+  if (!(await b.evalJS(barGone))) {
+    await b.evalJS(`document.querySelector('.tour-bar-skip')?.click()`)
+    // 跳过 ⇒ 球滑回右下角（0.8s），期间 `.ball` 仍 pointer-events:none。
+    await sleep(950)
   }
   await b.evalJS(`document.querySelector('.chat-root .ball')?.click()`)
   await sleep(250)

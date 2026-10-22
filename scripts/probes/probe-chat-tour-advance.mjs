@@ -115,9 +115,11 @@ async function clickAction() {
   return { clicked: true, label }
 }
 
-const popoverShown = `(() => { const p = document.querySelector('.driver-popover'); return !!p && getComputedStyle(p).display !== 'none' })()`
+// 2026-10-22：driver 自带 popover 已隐藏，飞行 / 落地状态看 `.driver-overlay`；
+// 控件看 `.tour-bar`（贴着飞过去的同一颗悬浮球）。
+const overlayShown = `!!document.querySelector('.driver-overlay')`
 const active = (sel) => `document.querySelector(${JSON.stringify(sel)})?.classList.contains('driver-active-element')`
-const progress = `document.querySelector('.driver-popover-progress-text')?.textContent?.trim() || ''`
+const progress = `document.querySelector('.tour-bar-step')?.textContent?.trim() || ''`
 const flowState = `sessionStorage.getItem('mall.chat.tourFlow.v1')`
 
 async function waitStep(sel, progressText, timeout = 15000) {
@@ -126,7 +128,7 @@ async function waitStep(sel, progressText, timeout = 15000) {
 }
 
 async function clickNext() {
-  await b.evalJS(`document.querySelector('.driver-popover-next-btn')?.click()`)
+  await b.evalJS(`document.querySelector('.tour-bar-next')?.click()`)
 }
 
 /** 真·鼠标点击：CDP 发在元素中心，走原生事件链（不是 el.click()）。 */
@@ -145,22 +147,24 @@ async function realClick(sel) {
   return point
 }
 
-/** 读精灵的当前 translate 与飞行元数据（不在飞行时返回 null 字段，不抛）。 */
+/** 读**原本那颗悬浮球**的位置与飞行元数据（2026-10-22：不再有 .tour-sprite）。 */
 const spriteProbe = `(() => {
-  const sp = document.querySelector('.tour-sprite')
+  const sp = document.querySelector('.chat-root .ball')
   if (!sp) return { exists: false }
-  const t = getComputedStyle(sp).transform
-  const m = t && t.startsWith('matrix') ? t.match(/matrix\\(([^)]+)\\)/) : null
-  const parts = m ? m[1].split(',').map(Number) : []
+  const r = sp.getBoundingClientRect()
+  const root = document.querySelector('.chat-root')
   return {
     exists: true,
-    visible: sp.classList.contains('is-visible'),
-    x: parts.length >= 6 ? Math.round(parts[4]) : null,
-    y: parts.length >= 6 ? Math.round(parts[5]) : null,
+    visible: true,
+    x: Math.round(r.left),
+    y: Math.round(r.top),
     from: sp.dataset.flightFrom || '',
     to: sp.dataset.flightTo || '',
     ms: sp.dataset.flightMs || '',
-    popover: (() => { const p = document.querySelector('.driver-popover'); return !!p && getComputedStyle(p).display !== 'none' })(),
+    tourMode: !!root && root.classList.contains('tour-mode'),
+    balls: document.querySelectorAll('.chat-root .ball').length,
+    sprites: document.querySelectorAll('.tour-sprite').length,
+    overlay: !!document.querySelector('.driver-overlay'),
   }
 })()`
 
@@ -198,38 +202,56 @@ try {
   for (let i = 0; i < 20; i++) {
     const s = await b.evalJS(spriteProbe)
     samples.push({ t: Date.now() - t0, ...s })
-    if (s.popover && i > 2) break
+    if (s.overlay && i > 2) break
     await sleep(60)
   }
   const moved = samples.filter((s) => s.exists && s.visible && Number.isFinite(s.x))
   const distinct = new Set(moved.map((s) => `${s.x},${s.y}`))
   // ⚠️ data-flight-* 是从上一次飞行残留到这次的：必须取**落位后**那一帧，
-  //    取首帧会把上一段的终点（82,560）当成本次目标。
+  //    取首帧会把上一段的终点当成本次目标。
   const flight = moved[moved.length - 1] || {}
   const to = (flight.to || '').split(',').map(Number)
   const midSamples = moved.filter((s) => s.t > 90 && s.t < 750)
-  const overlayDuringFlight = samples.filter((s) => s.t < 600 && s.popover)
-  const finalPopover = samples[samples.length - 1]?.popover
-  ok('② 切步时小助手是「滑过去」的：0.8s 内采到多个中间位置',
+  const overlayDuringFlight = samples.filter((s) => s.t < 600 && s.overlay)
+  const finalOverlay = samples[samples.length - 1]?.overlay
+  ok('② 切步时「原本那颗悬浮球」是滑过去的：0.8s 内采到多个中间位置',
     moved.length >= 3 && distinct.size >= 3 && flight.ms === '800'
       && midSamples.length >= 2,
     { samples: moved.map((s) => ({ t: s.t, x: s.x, y: s.y, ms: s.ms })), distinct: distinct.size })
-  ok('② 飞行 0.6s 内没有遮罩 / 弹窗，落位后才亮高亮',
-    overlayDuringFlight.length === 0 && finalPopover === true,
-    { overlayDuringFlight, finalPopover, to })
+  ok('② 全屏始终只有一颗绿球（0 个 .tour-sprite），画风不分叉',
+    samples.every((s) => s.balls === 1 && s.sprites === 0 && s.tourMode),
+    { balls: [...new Set(samples.map((s) => s.balls))], sprites: [...new Set(samples.map((s) => s.sprites))] })
+  ok('② 飞行 0.6s 内没有遮罩，落位后才亮遮罩 / 高亮',
+    overlayDuringFlight.length === 0 && finalOverlay === true,
+    { overlayDuringFlight, finalOverlay, to })
   const landed = moved[moved.length - 1] || {}
   // 独立对照：落位后直接量目标元素，按实现口径算期望落点（不只看实现自己写的 dataset）。
   const rect = await b.evalJS(`(() => {
     const el = document.querySelector('#tour-publish-image')
     if (!el) return null
     const r = el.getBoundingClientRect()
-    return { left: Math.round(r.left), top: Math.round(r.top) }
+    return {
+      left: Math.round(r.left), top: Math.round(r.top), right: Math.round(r.right),
+      height: Math.round(r.height), innerW: window.innerWidth, innerH: window.innerHeight,
+    }
   })()`)
-  const expect = rect
-    ? { x: Math.max(8, Math.min(rect.left, 1440 - 56)), y: Math.max(8, rect.top - 60) }
-    : null
+  let expect = null
+  if (rect) {
+    const BALL = 56
+    let ex = rect.left - 12 - BALL
+    let ey = rect.top + Math.max(0, Math.min((rect.height - BALL) / 2, 24))
+    if (ex < 8) {
+      const right = rect.right + 12
+      if (right + BALL <= rect.innerW - 8) ex = right
+      else { ex = rect.left; ey = rect.top - BALL - 8 }
+    }
+    expect = {
+      x: Math.round(Math.max(8, Math.min(ex, rect.innerW - BALL - 8))),
+      y: Math.round(Math.max(8, Math.min(ey, rect.innerH - BALL - 8))),
+    }
+  }
   const landErr = expect ? Math.hypot(landed.x - expect.x, landed.y - expect.y) : 999
-  ok('② 落点 = 目标元素上方 60px（对照实测 rect）',
+  ok('② 落点 = 目标左侧 12px（对照实测 rect）',
     !!expect && landErr <= 2 && to[0] === expect.x && to[1] === expect.y,
     { landed: { x: landed.x, y: landed.y }, to, rect, expect, landErr })
   const s3 = await waitStep('#tour-publish-image', '第 3 步 / 共 7 步')
@@ -242,28 +264,45 @@ try {
   const f0 = Date.now()
   for (let i = 0; i < 6; i++) {
     const s = await b.evalJS(spriteProbe)
-    frames.push({ t: Date.now() - f0, x: s.x, y: s.y, ms: s.ms, popover: s.popover })
+    frames.push({ t: Date.now() - f0, x: s.x, y: s.y, ms: s.ms, overlay: s.overlay, balls: s.balls })
     await b.shot(path.join(OUT, `adv-03-flight-frame${i + 1}.png`))
     await sleep(40)
   }
   const framePos = new Set(frames.filter((f) => Number.isFinite(f.x)).map((f) => `${f.x},${f.y}`))
   fs.writeFileSync(path.join(OUT, 'flight-frames.txt'),
-    frames.map((f) => `t=${f.t}ms x=${f.x} y=${f.y} flightMs=${f.ms} popover=${f.popover}`).join('\n') + '\n')
-  ok('③ 帧序列里精灵位置逐帧变化（不是瞬间出现）',
-    framePos.size >= 3, { frames, distinct: framePos.size })
+    frames.map((f) => `t=${f.t}ms x=${f.x} y=${f.y} flightMs=${f.ms} overlay=${f.overlay} balls=${f.balls}`).join('\n') + '\n')
+  ok('③ 帧序列里同一颗球位置逐帧变化（不是瞬间出现）',
+    framePos.size >= 3 && frames.every((f) => f.balls === 1), { frames, distinct: framePos.size })
 
   // ── ④ 负向：用户关掉漫游后，点击同一个入口不该再自动开高亮 ──────────────
-  await b.evalJS(`document.querySelector('.driver-popover-close-btn')?.click()`)
-  await sleep(400)
+  // 飞行途中没有控件（有意为之）⇒ 先等这一步落地、`.tour-bar` 出现再点「跳过」。
+  await waitFor(`document.querySelector('.tour-bar')`, 5000)
+  await b.evalJS(`document.querySelector('.tour-bar-skip')?.click()`)
+  await sleep(1100)   // 跳过 ⇒ 同一颗球滑回右下角（0.8s）
   const cleared = await b.evalJS(flowState)
+  const home = await b.evalJS(`(() => {
+    const sp = document.querySelector('.chat-root .ball')
+    const de = document.documentElement
+    const r = sp.getBoundingClientRect()
+    return {
+      x: Math.round(r.left), y: Math.round(r.top),
+      wantX: de.clientWidth - 24 - 56, wantY: de.clientHeight - 24 - 56,
+      tourMode: document.querySelector('.chat-root').classList.contains('tour-mode'),
+      balls: document.querySelectorAll('.chat-root .ball').length,
+      sprites: document.querySelectorAll('.tour-sprite').length,
+    }
+  })()`)
+  ok('④ 结束后同一颗球飞回右下角（位置还原、tour-mode 摘掉、无分身）',
+    cleared === null && home.tourMode === false && home.balls === 1 && home.sprites === 0
+      && Math.hypot(home.x - home.wantX, home.y - home.wantY) <= 2, { cleared, home })
   await goHash('#/merchant')
   const p2 = await realClick('#tour-entry-merchant')
   const navOk = await waitFor(`location.hash === '#/merchant/user'`, 6000)
   await sleep(2500)
-  const popAfter = await b.evalJS(popoverShown)
+  const overlayAfter = await b.evalJS(overlayShown)
   ok('④ 关掉漫游后监听被摘掉：点击照常跳转，2.5s 内不再自动高亮',
-    cleared === null && !!p2 && navOk && popAfter === false,
-    { cleared, navOk, popAfter, hash: await b.evalJS('location.hash') })
+    cleared === null && !!p2 && navOk && overlayAfter === false,
+    { cleared, navOk, overlayAfter, hash: await b.evalJS('location.hash') })
 
   ok('页面无未捕获异常', pageErrors.length === 0, { pageErrors })
 } catch (e) {

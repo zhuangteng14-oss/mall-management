@@ -38,6 +38,12 @@ export const NAV_NODES = [
   { path: '/merchant/seckill', title: '秒杀报名', description: '选择商品参加平台秒杀。', anchor: '.skl-page', roles: MERCHANT },
   { path: '/merchant/after-sales', title: '售后工作台', description: '退款 / 退货 / 售后队列与处理。', anchor: '.order-center-page', roles: MERCHANT },
 
+  // ── 裸页 ──────────────────────────────────────────────────────────────────
+  // 商品详情（`/product`，`meta.public`）。它不是壳页，但**必须进图**：
+  // 用户在详情页问「售后」时，BFS 要先把他带回商城首页，再走壳内的入口 ——
+  // 见下方 `/product → /merchant|customer` 的两条「‹ 返回」边。
+  { path: '/product', title: '商品详情', description: '商品详情：图文、SKU、价格与购买入口。', anchor: '.goods-detail-page', roles: ['1', '2', '3'] },
+
   // ── 客户壳 ────────────────────────────────────────────────────────────────
   { path: '/customer', title: '商城首页', description: '商城主页：浏览商品、搜索、进入平台活动。', anchor: '.home-page', roles: CUSTOMER },
   { path: '/customer/search', title: '商品搜索', description: '按关键词搜索商品。', anchor: '.goods-select-view', roles: CUSTOMER },
@@ -120,6 +126,10 @@ export const NAV_EDGES = [
   ...topEdges('/customer', '/customer/cart'),
   ...hubLinks('/merchant/user', MERCHANT_HUB_LINKS),
   ...hubLinks('/customer/user', CUSTOMER_HUB_LINKS),
+  // 详情页的唯一出口：左上角「‹ 返回」（ProductPage.goBack 按身份回商家 / 客户首页）。
+  // 两条边同一个选择器：BFS 只会走通向目标的那一条，不需要前端再判角色。
+  { from: '/product', to: '/merchant', selector: '.nav-back', label: '返回商城首页' },
+  { from: '/product', to: '/customer', selector: '.nav-back', label: '返回商城首页' },
 ]
 
 /** 去掉 query / hash / 末尾斜杠 —— 与 `useTour.currentTourPath()` 同口径。 */

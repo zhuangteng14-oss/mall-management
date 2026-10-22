@@ -246,24 +246,26 @@ try {
 
   await b.evalJS(`document.querySelector('.tour-btn').click()`)
   ok('跨页到申请页', await waitFor(`location.hash.includes('/user/apply')`, 12000))
-  const tourUp = await waitFor(`document.querySelector('.driver-popover.chat-tour-popover')`, 12000)
-  const step1 = await b.evalJS(`document.querySelector('.driver-popover-title')?.textContent || ''`)
+  // 2026-10-22：driver popover 已隐藏，控件在贴着悬浮球的 `.tour-bar` 里。
+  const tourUp = await waitFor(`document.querySelector('.tour-bar')`, 12000)
+  const step1 = await b.evalJS(`document.querySelector('.tour-bar-title')?.textContent || ''`)
   ok('自动开启漫游 · 第 1 步高亮店铺名称', tourUp && step1.includes('店铺'), { step1 })
   const hl1 = await b.evalJS(`document.querySelector('.driver-active-element')?.id || ''`)
   ok('第 1 步落点是 #tour-shop-name', hl1 === 'tour-shop-name', { hl1 })
   await sleep(500)
   await b.shot(path.join(OUT, 'tour-step1.png'))
 
-  await b.evalJS(`document.querySelector('.driver-popover-next-btn').click()`)
-  await sleep(600)
-  const step2 = await b.evalJS(`document.querySelector('.driver-popover-title')?.textContent || ''`)
+  await b.evalJS(`document.querySelector('.tour-bar-next')?.click()`)
+  // 切步要等 0.8s 飞行落地后才 drive()，别用固定短 sleep 读高亮。
+  await waitFor(`document.querySelector('#tour-submit')?.classList.contains('driver-active-element')`, 6000)
+  const step2 = await b.evalJS(`document.querySelector('.tour-bar-title')?.textContent || ''`)
   const hl2 = await b.evalJS(`document.querySelector('.driver-active-element')?.id || ''`)
   ok('第 2 步高亮提交按钮', step2.includes('提交') && hl2 === 'tour-submit', { step2, hl2 })
   await b.shot(path.join(OUT, 'tour-step2.png'))
 
   // ③b Q10 二次进入：关掉漫游 → 回客户首页 → 再点一次「怎么开店」
-  await b.evalJS(`document.querySelector('.driver-popover-close-btn')?.click()`)
-  await sleep(500)
+  await b.evalJS(`document.querySelector('.tour-bar-skip')?.click()`)
+  await sleep(950)
   await b.evalJS(`location.hash = '#/customer'`)
   await sleep(2600)
   await openPanel()
@@ -273,15 +275,15 @@ try {
   ok('二次进入：再次出现「一键带我去开店」', await waitFor(`document.querySelector('.tour-btn')`, 10000))
   await sleep(2600)
   await b.evalJS(`document.querySelector('.tour-btn').click()`)
-  const reTour = await waitFor(`document.querySelector('.driver-popover.chat-tour-popover')`, 12000)
-  const reStep = await b.evalJS(`document.querySelector('.driver-popover-title')?.textContent || ''`)
+  const reTour = await waitFor(`document.querySelector('.tour-bar')`, 12000)
+  const reStep = await b.evalJS(`document.querySelector('.tour-bar-title')?.textContent || ''`)
   ok('二次进入：漫游重新开启且停在第 1 步', reTour && reStep.includes('店铺'), { reStep })
   await sleep(500)
   await b.shot(path.join(OUT, 'tour-reentry.png'))
 
   // 关掉漫游，回客户首页做六态与兜底断言
-  await b.evalJS(`document.querySelector('.driver-popover-close-btn')?.click()`)
-  await sleep(500)
+  await b.evalJS(`document.querySelector('.tour-bar-skip')?.click()`)
+  await sleep(950)
   await b.evalJS(`location.hash = '#/customer'`)
   await sleep(2500)
 
