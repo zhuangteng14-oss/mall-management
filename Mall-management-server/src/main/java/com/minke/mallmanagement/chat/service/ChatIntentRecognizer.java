@@ -50,6 +50,24 @@ public final class ChatIntentRecognizer {
     private static final Pattern OPEN_STORE = Pattern.compile(
             "开店|入驻|开个店|开一家店|开店铺|成为商家|卖东西|卖货|上架|加盟|营业执照");
 
+    /**
+     * 报名秒杀 / 参加平台活动（N3 / Q5=A）。
+     *
+     * <p>⚠️ 必须排在 {@link #OPEN_STORE} **前面**：{@code 上架.*秒杀} 里含「上架」，
+     * 而开店的模式也认「上架」；先问「怎么把商品上架到秒杀」的用户要的是报名，不是入驻。
+     */
+    private static final Pattern SECKILL = Pattern.compile(
+            "秒杀|限时抢购|参加活动|报名活动|上架.*秒杀|加入.*秒杀");
+
+    /**
+     * 用户自述「我是商家 / 我是品牌商家」（增量-A 规则 2）。
+     *
+     * <p>只识别自述，**不据此判定身份** —— 是否真是商家由 {@code IdentityResolver} 查库。
+     * 放在开店之后：「我是商家，怎么开店」仍走开店分支（那边同样先报身份）。
+     */
+    private static final Pattern SELF_CLAIM = Pattern.compile(
+            "我是(商家|卖家|品牌商家|品牌|商户|普通用户|普通客户)");
+
     /** 纯问候才命中 —— 「你好，怎么开店」必须继续往下走。 */
     private static final Pattern GREETING = Pattern.compile(
             "^(你好|您好|嗨|hi|hello|在吗|在不在|早上好|晚上好|哈喽)[!！。.~～]*$");
@@ -78,8 +96,12 @@ public final class ChatIntentRecognizer {
             intent = ChatIntent.REFUND_QUERY;
         } else if (ORDER.matcher(text).find()) {
             intent = ChatIntent.ORDER_QUERY;
+        } else if (SECKILL.matcher(text).find()) {
+            intent = ChatIntent.ADD_TO_SECKILL;
         } else if (OPEN_STORE.matcher(text).find()) {
             intent = ChatIntent.OPEN_STORE;
+        } else if (SELF_CLAIM.matcher(text).find()) {
+            intent = ChatIntent.IDENTITY_CLAIM;
         } else if (GREETING.matcher(text).matches()) {
             intent = ChatIntent.GREETING;
         } else if (HELP.matcher(text).find()) {

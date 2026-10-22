@@ -1,6 +1,9 @@
 package com.minke.mallmanagement.chat.service;
 
 import com.minke.mallmanagement.chat.model.ChatIntent;
+import com.minke.mallmanagement.chat.model.ResolvedIdentity;
+import com.minke.mallmanagement.chat.model.UserIdentity;
+import com.minke.mallmanagement.order.RefundStatusText;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
 import com.minke.mallmanagement.order.refund.service.OrderRefundService;
@@ -12,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * 智能客服的编排层：意图 → 只读查询 → 中文回复。
@@ -47,25 +51,32 @@ public class ChatAgentService {
             "ILLEGAL_DELIVERED_RECEIVED_UNPAID", "状态异常（未付款已发货已收货）",
             "UNCLASSIFIED", "无法归类");
 
-    /** 售后状态 → 中文。逐字对齐 {@code order.RefundStatus} 的列注释与前端 {@code REFUND_TEXT}。 */
-    private static final Map<Integer, String> REFUND_LABEL = Map.of(
-            0, "已经结单",
-            1, "待商家审核",
-            2, "商家已拒绝",
-            3, "平台处理中",
-            4, "平台已拒绝",
-            5, "已退款");
+    /** 售后状态 → 中文。唯一源在 {@link RefundStatusText}（N5 / Q8=A），本类不再自持一份。 */
+
+    /** 「那…呢 / 到哪了 / 进度」这类短追问 —— 仅在意图识别为 UNKNOWN 时用来接上一轮上下文。 */
+    private static final Pattern FOLLOW_UP = Pattern.compile(
+            "^(那|那么|这个|那个|它|还有|然后)|(呢|到哪|怎么样了|怎么样|处理了吗|进度)");
+
+    /** 用户自述「我是商家」—— 只用于**对照**系统解析结果，不单独当身份依据（增量-A 规则 2）。 */
+    private static final Pattern CLAIM_MERCHANT = Pattern.compile(
+            "我是(商家|卖家|品牌商家|品牌|商户)");
 
     private final OrderDao orderDao;
     private final OrderRefundService refundService;
     private final OrderStateMachine orderStateMachine;
+    private final IdentityResolver identityResolver;
+    private final SessionMemoryService memoryService;
 
     public ChatAgentService(OrderDao orderDao,
                             OrderRefundService refundService,
-                            OrderStateMachine orderStateMachine) {
+                            OrderStateMachine orderStateMachine,
+                            IdentityResolver identityResolver,
+                            SessionMemoryService memoryService) {
         this.orderDao = orderDao;
         this.refundService = refundService;
         this.orderStateMachine = orderStateMachine;
+        this.identityResolver = identityResolver;
+        this.memoryService = memoryService;
     }
 
     /**
@@ -85,18 +96,49 @@ public class ChatAgentService {
             return fail("消息太长了，请控制在 " + MAX_MESSAGE_LEN + " 字以内");
         }
 
+        String normalized = ChatIntentRecognizer.normalize(message);
+        FaqKnowledgeBase.Answer faq = FaqKnowledgeBase.match(normalized);
+        // ⚠️ 政策类 FAQ 排在任务意图**前面**：用户给的例子「拆封了能退货吗」里含「退货」，
+        //    会先命中 REFUND 正则 ⇒ 只在 UNKNOWN 分支查 FAQ 的话，这条示例永远答不到。
+        //    其余 FAQ 仍按增量要求挂在 UNKNOWN 分支。
+        if (faq != null && faq.policy()) {
+            return remember(userId, message, ChatIntent.FAQ, null, answerFaq(faq.text()));
+        }
+
         ChatIntentRecognizer.Match match = ChatIntentRecognizer.recognize(message);
-        return switch (match.intent()) {
-            case ORDER_QUERY -> answerOrders(userId, role, match.orderId());
+        ChatIntent intent = match.intent();
+        String orderId = match.orderId();
+
+        if (intent == ChatIntent.UNKNOWN) {
+            if (faq != null) {
+                return remember(userId, message, ChatIntent.FAQ, null, answerFaq(faq.text()));
+            }
+            // 短期记忆：只有「那…呢 / 到哪了 / 进度」这类短追问才接上一轮意图，
+            // 避免把「今天天气不错」也当成订单问题。
+            SessionMemoryService.Context context = memoryService.lastContext(userId);
+            if (context != null && isFollowUp(normalized)) {
+                intent = context.intent();
+                if (intent == ChatIntent.ORDER_QUERY && isBlank(orderId)) {
+                    orderId = context.orderId();
+                }
+            }
+        }
+
+        Map<String, Object> resp = switch (intent) {
+            case ORDER_QUERY -> answerOrders(userId, role, orderId);
             case REFUND_QUERY -> answerRefund(userId, role);
-            case OPEN_STORE -> answerOpenStore(role);
+            case OPEN_STORE -> answerOpenStore(userId, role);
+            case ADD_TO_SECKILL -> answerAddToSeckill(userId, role);
+            case IDENTITY_CLAIM -> answerIdentityClaim(message, userId, role);
             case GREETING -> answerSmallTalk(match.intent(),
                     "你好呀～我可以帮你查订单、查售后进度，也能一键带你去开店。");
             case HELP -> answerSmallTalk(match.intent(),
                     "我会这些：① 查最新订单状态；② 查退款进度；③ 带你去开店（含两步高亮引导）。");
+            case FAQ -> answerFaq(faq == null ? "我暂时听不懂这句话。" : faq.text());
             default -> answerSmallTalk(ChatIntent.UNKNOWN,
                     "我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。");
         };
+        return remember(userId, message, intent, orderIdOf(resp, orderId), resp);
     }
 
     // ==================== 订单 ====================
@@ -260,7 +302,7 @@ public class ChatAgentService {
 
         Map<String, Object> row = rows.get(0);
         int status = intOf(row.get("RefundStatus"), 0);
-        String statusLabel = REFUND_LABEL.getOrDefault(status, "未知状态");
+        String statusLabel = RefundStatusText.of(status);
         double amount = doubleOf(row.get("RefundAmount"));
         if (amount <= 0d) {
             amount = doubleOf(row.get("Price"));
@@ -321,43 +363,268 @@ public class ChatAgentService {
 
     // ==================== 开店 ====================
 
-    private Map<String, Object> answerOpenStore(Integer role) {
-        String text;
-        if (isMerchant(role)) {
-            text = "你已经是商家了。如果要做品牌加盟，点下面的按钮，我带你到申请页，并高亮"
-                    + "「店铺名称」和「提交申请」两处。";
-        } else {
-            text = "开店三步：① 填写店铺名称与营业执照号；② 提交入驻申请；③ 平台审核通过后，"
-                    + "账号自动升级为商家。点下面的按钮，我直接带你到申请页，并高亮要填的两处。";
+    /**
+     * 开店 / 入驻（N2）：第一句固定先报系统解析出的身份，再按六态分流。
+     *
+     * <p>不反问「您是商家还是用户」—— 身份来自会话 + 库，用户看到判断后可当场纠错；
+     * 每次调用都重新 {@link IdentityResolver#resolve}，审核状态一变下一句就能反映。
+     */
+    private Map<String, Object> answerOpenStore(String userId, Integer role) {
+        ResolvedIdentity id = identityResolver.resolve(userId, role);
+        String who = identitySentence(id);
+        if (id.boundary() == ResolvedIdentity.Boundary.ADMIN) {
+            return reply(ChatIntent.OPEN_STORE,
+                    who + "管理员不需要入驻，请在管理端处理商家审核。",
+                    null, null, defaultSuggestions());
         }
-        Map<String, Object> action = new LinkedHashMap<>();
-        action.put("type", "tour");
-        action.put("tourId", "open-store");
-        action.put("routeKey", "apply");
-        action.put("label", "一键带我去开店");
+        if (id.boundary() == ResolvedIdentity.Boundary.DEGRADED_MERCHANT) {
+            return reply(ChatIntent.OPEN_STORE,
+                    who + "重新提交入驻申请，审核通过后即可恢复商家身份。",
+                    null, applyAction("重新申请"), defaultSuggestions());
+        }
+        return switch (id.identity()) {
+            case MERCHANT -> reply(ChatIntent.OPEN_STORE,
+                    who + "如果要做品牌加盟，点下面的按钮，我带你到申请页，并高亮"
+                            + "「店铺名称」和「提交申请」两处。",
+                    null, applyAction("一键带我去开店"), defaultSuggestions());
+            case MERCHANT_BRAND -> reply(ChatIntent.OPEN_STORE,
+                    who + "如需新增品牌，可以到申请页提交品牌加盟材料。",
+                    null, applyAction("去申请品牌加盟"), defaultSuggestions());
+            case USER_PENDING -> reply(ChatIntent.OPEN_STORE,
+                    who + "审核通过后账号会自动升级为商家，先不用重复提交。",
+                    null, null, progressSuggestions());
+            case USER_REJECTED -> reply(ChatIntent.OPEN_STORE,
+                    who + "可以修改资料后重新提交，审核通过后账号自动升级为商家。",
+                    null, applyAction("重新申请"), defaultSuggestions());
+            default -> reply(ChatIntent.OPEN_STORE,
+                    who + "开店三步：① 填写店铺名称与营业执照号；② 提交入驻申请；③ 平台审核通过后，"
+                            + "账号自动升级为商家。点下面的按钮，我直接带你到申请页，并高亮要填的两处。",
+                    null, applyAction("一键带我去开店"), defaultSuggestions());
+        };
+    }
 
-        List<Object> suggestions = new ArrayList<>();
-        suggestions.add("查我的订单");
-        suggestions.add("查售后进度");
-        return reply(ChatIntent.OPEN_STORE, text, null, action, suggestions);
+    // ==================== 秒杀报名（N3 / Q5=A） ====================
+
+    /**
+     * 「我要报名秒杀」—— **只导航 + 身份分支**，不猜 GoodsId / 价格 / 库存，也不写秒杀表。
+     *
+     * <p>六个状态里：商家 / 品牌商家给「去秒杀报名」胶囊（前端 push
+     * {@code /merchant/seckill}）；无申请复用开店漫游；审核中只答不导航；被拒给
+     * 「重新申请」；未登录给「登录后去报名」，前端存 pendingTour，登录后按真实角色续接。
+     */
+    private Map<String, Object> answerAddToSeckill(String userId, Integer role) {
+        ResolvedIdentity id = identityResolver.resolve(userId, role);
+        String who = identitySentence(id);
+        if (id.boundary() == ResolvedIdentity.Boundary.ADMIN) {
+            return reply(ChatIntent.ADD_TO_SECKILL,
+                    who + "管理员不参与秒杀报名，请在管理端配置活动。",
+                    null, null, defaultSuggestions());
+        }
+        if (id.boundary() == ResolvedIdentity.Boundary.DEGRADED_MERCHANT) {
+            return reply(ChatIntent.ADD_TO_SECKILL,
+                    who + "重新入驻通过后可以报名秒杀。",
+                    null, null, List.of(routeSuggestion("重新申请", "apply")));
+        }
+        return switch (id.identity()) {
+            case MERCHANT, MERCHANT_BRAND -> reply(ChatIntent.ADD_TO_SECKILL,
+                    who + "带你去秒杀报名页，到了填商品和价格就行。",
+                    null, null, List.of(routeSuggestion("去秒杀报名", "seckill")));
+            case USER_NO_APPLICATION -> reply(ChatIntent.ADD_TO_SECKILL,
+                    who + "需要先完成商家入驻，审核通过后才能报名秒杀。",
+                    null, applyAction("先去入驻"), List.of("查我的订单"));
+            case USER_PENDING -> reply(ChatIntent.ADD_TO_SECKILL,
+                    who + "审核通过后就可以报名秒杀，现在先不用重复提交。",
+                    null, null, progressSuggestions());
+            case USER_REJECTED -> reply(ChatIntent.ADD_TO_SECKILL,
+                    who + "修改资料后可以重新申请，通过后就能报名秒杀。",
+                    null, null, List.of(routeSuggestion("重新申请", "apply")));
+            default -> reply(ChatIntent.ADD_TO_SECKILL,
+                    who + "登录后才能报名秒杀。登录后我会接着这一步。",
+                    null, null, List.of(routeSuggestion("登录后去报名", "seckill")));
+        };
+    }
+
+    // ==================== 身份自述（增量-A 规则 2） ====================
+
+    /**
+     * 用户说「我是商家」时**不盲信自述**：先报系统解析结果；若自述与解析不符，
+     * 给「查入驻进度 / 去入驻」两个胶囊，让用户自己核对（而不是争论谁对）。
+     */
+    private Map<String, Object> answerIdentityClaim(String message, String userId, Integer role) {
+        ResolvedIdentity id = identityResolver.resolve(userId, role);
+        String who = identitySentence(id);
+        boolean claimsMerchant = CLAIM_MERCHANT.matcher(ChatIntentRecognizer.normalize(message)).find();
+        boolean actuallyMerchant = id.identity() == UserIdentity.MERCHANT
+                || id.identity() == UserIdentity.MERCHANT_BRAND;
+        if (claimsMerchant && !actuallyMerchant) {
+            List<Object> chips = new ArrayList<>();
+            chips.add(routeSuggestion("查入驻进度", "applyStatus"));
+            chips.add(routeSuggestion("去入驻", "apply"));
+            return reply(ChatIntent.IDENTITY_CLAIM,
+                    who + "如果你确信账号状态不对，可以查一下入驻进度，或直接去入驻页重新提交。",
+                    null, null, chips);
+        }
+        return reply(ChatIntent.IDENTITY_CLAIM,
+                who + "需要我帮你查订单、售后，还是带你去开店？",
+                null, null, defaultSuggestions());
+    }
+
+    /**
+     * 六态话术的**第一句**（N2 表逐字口径），附带的店铺名 / 时间 / 原因 / 商家号 / 品牌
+     * 都来自 {@link ResolvedIdentity}，本方法不再查库。
+     *
+     * <p>边界态（Q3=A）先于六态判断：ADMIN、DEGRADED_MERCHANT 不进 {@link UserIdentity}。
+     */
+    private String identitySentence(ResolvedIdentity id) {
+        if (id.boundary() == ResolvedIdentity.Boundary.ADMIN) {
+            return "您当前是管理员账号。";
+        }
+        if (id.boundary() == ResolvedIdentity.Boundary.DEGRADED_MERCHANT) {
+            return "您当前是已降级/冻结商家。";
+        }
+        if (id.identity() == null) {
+            return "您当前还未登录。";
+        }
+        return switch (id.identity()) {
+            case ANONYMOUS -> "您当前还未登录。";
+            case USER_NO_APPLICATION -> "系统显示您当前是普通客户，还没有提交过入驻申请。";
+            case USER_PENDING -> "系统显示您当前是「入驻审核中」。" + pendingDetail(id);
+            case USER_REJECTED -> "系统显示您当前是「入驻未通过」。"
+                    + "原因：" + (isBlank(id.rejectReason()) ? "未填写" : id.rejectReason()) + "。";
+            case MERCHANT -> "系统显示您当前是商家。"
+                    + (isBlank(id.merchantId()) ? "" : "商家号：" + id.merchantId() + "。");
+            case MERCHANT_BRAND -> "系统显示您当前是品牌商家。" + brandDetail(id);
+        };
+    }
+
+    private static String pendingDetail(ResolvedIdentity id) {
+        StringBuilder sb = new StringBuilder();
+        if (!isBlank(id.shopName())) {
+            sb.append("店铺「").append(id.shopName()).append("」");
+        }
+        if (!isBlank(id.submittedAt())) {
+            sb.append(sb.length() == 0 ? "提交时间 " : "于 ").append(id.submittedAt());
+        }
+        if (sb.length() > 0) {
+            sb.append("，");
+        }
+        return sb.append("正在等平台审核。").toString();
+    }
+
+    private static String brandDetail(ResolvedIdentity id) {
+        StringBuilder sb = new StringBuilder();
+        if (!isBlank(id.brandName())) {
+            sb.append("品牌：").append(id.brandName()).append("，");
+        }
+        sb.append(isBlank(id.brandValidTo()) ? "长期有效。" : "有效期至 " + id.brandValidTo() + "。");
+        return sb.toString();
     }
 
     // ==================== 通用 ====================
 
+    /** FAQ 命中：标准答案 + 常规胶囊（增量「轻量知识库」）。 */
+    private Map<String, Object> answerFaq(String text) {
+        return reply(ChatIntent.FAQ, text, null, null, defaultSuggestions());
+    }
+
     private Map<String, Object> answerSmallTalk(ChatIntent intent, String text) {
-        List<Object> suggestions = new ArrayList<>();
-        suggestions.add("查我的订单");
-        suggestions.add("查售后进度");
-        suggestions.add("怎么开店");
-        return reply(intent, text, null, null, suggestions);
+        return reply(intent, text, null, null, defaultSuggestions());
     }
 
     private Map<String, Object> notLoggedIn(ChatIntent intent) {
         List<Object> suggestions = new ArrayList<>();
         suggestions.add("怎么开店");
         return reply(intent,
-                "登录后才能查询你的订单和售后。你可以先问我「怎么开店」，或登录后再来。",
+                "您当前还未登录。登录后才能查询你的订单和售后。你可以先问我「怎么开店」，或登录后再来。",
                 null, null, suggestions);
+    }
+
+    // ==================== 短期记忆 / 小工具 ====================
+
+    /**
+     * 成功回复后写一行短期记忆（{@code chat:session:{userId}}，TTL 30 分钟）。
+     *
+     * <p>只记「有业务含义」的意图；FAQ / 问候 / 兜底不记，免得下一句「那退款呢」被
+     * 上一句闲聊聊偏。Redis 故障由 {@link SessionMemoryService} 吞掉，不影响本次回复。
+     */
+    private Map<String, Object> remember(String userId, String message, ChatIntent intent,
+                                         String orderId, Map<String, Object> resp) {
+        if (memoryService != null
+                && Boolean.TRUE.equals(resp.get("success"))
+                && memoryWorthy(intent)) {
+            memoryService.remember(userId, message, intent, orderId,
+                    String.valueOf(resp.getOrDefault("reply", "")));
+        }
+        return resp;
+    }
+
+    private static boolean memoryWorthy(ChatIntent intent) {
+        return intent == ChatIntent.ORDER_QUERY
+                || intent == ChatIntent.REFUND_QUERY
+                || intent == ChatIntent.OPEN_STORE
+                || intent == ChatIntent.ADD_TO_SECKILL
+                || intent == ChatIntent.IDENTITY_CLAIM;
+    }
+
+    /** 从回复体里取「这一轮实际讲的订单号」，供下一句「到哪了」复用。 */
+    private static String orderIdOf(Map<String, Object> resp, String explicit) {
+        if (!isBlank(explicit)) {
+            return explicit;
+        }
+        Object data = resp.get("data");
+        if (!(data instanceof Map<?, ?> map)) {
+            return null;
+        }
+        Object direct = map.get("orderId");
+        if (direct != null && !isBlank(String.valueOf(direct))) {
+            return String.valueOf(direct);
+        }
+        Object orders = map.get("orders");
+        if (orders instanceof List<?> list && !list.isEmpty()
+                && list.get(0) instanceof Map<?, ?> first) {
+            Object rowOrderId = first.get("orderId");
+            if (rowOrderId != null && !isBlank(String.valueOf(rowOrderId))) {
+                return String.valueOf(rowOrderId);
+            }
+        }
+        return null;
+    }
+
+    /** 短追问判据：只对 ≤20 字的「那…呢 / 到哪了 / 进度」生效。 */
+    private static boolean isFollowUp(String normalized) {
+        return normalized.length() <= 20 && FOLLOW_UP.matcher(normalized).find();
+    }
+
+    private static List<Object> defaultSuggestions() {
+        List<Object> suggestions = new ArrayList<>();
+        suggestions.add("查我的订单");
+        suggestions.add("查售后进度");
+        suggestions.add("怎么开店");
+        return suggestions;
+    }
+
+    private static List<Object> progressSuggestions() {
+        List<Object> suggestions = new ArrayList<>();
+        suggestions.add(routeSuggestion("查入驻进度", "applyStatus"));
+        suggestions.add("查我的订单");
+        return suggestions;
+    }
+
+    /** 对象型 suggestion：前端据此渲染「跳转」胶囊，而不是把 label 当普通消息再发一遍。 */
+    private static Map<String, Object> routeSuggestion(String label, String routeKey) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("label", label);
+        item.put("routeKey", routeKey);
+        return item;
+    }
+
+    private static Map<String, Object> applyAction(String label) {
+        Map<String, Object> action = new LinkedHashMap<>();
+        action.put("type", "tour");
+        action.put("tourId", "open-store");
+        action.put("routeKey", "apply");
+        action.put("label", label);
+        return action;
     }
 
     private Map<String, Object> reply(ChatIntent intent, String text, Object data,

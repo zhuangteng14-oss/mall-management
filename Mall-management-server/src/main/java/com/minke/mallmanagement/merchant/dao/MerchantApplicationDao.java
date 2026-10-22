@@ -165,4 +165,31 @@ public class MerchantApplicationDao {
     private static boolean isBlank(String s) {
         return s == null || s.trim().isEmpty();
     }
+
+    /**
+     * 某账号**某一种**申请（{@code settle} / {@code brand}）里最新的一条（2026-10-22，N1）。
+     *
+     * <p>为什么不能用 {@link #selectByUsername}：那条把 settle 与 brand 混在一起按时间倒序，
+     * 一个刚做过品牌加盟的商家会被判成「最近申请是 brand」，从而丢掉入驻状态。身份解析只关心
+     * {@code settle}，必须带 {@code ApplicationType} 过滤（R2）。
+     *
+     * <p>排序与既有两个读方法同口径（{@code SubmittedAt DESC, Id DESC}）—— 同一秒提交的两条
+     * 靠自增主键稳定先后，避免「审核中」与「已驳回」在同一次解析里来回跳。
+     *
+     * <p>⚠️ 方法体追加在**文件末尾**（{@code isBlank} 之后），不移动上面任何被文档按行号引用的位置。
+     *
+     * @param username        登录名（不是业务号）
+     * @param applicationType {@code settle} 或 {@code brand}
+     * @return 查不到 ⇒ {@code null}
+     */
+    public Map<String, Object> selectLatestByUsernameAndType(String username, String applicationType) {
+        String sql = "SELECT " + COLUMNS + "FROM merchant_application "
+                + "WHERE Username = ? AND ApplicationType = ? "
+                + "ORDER BY SubmittedAt DESC, Id DESC LIMIT 1";
+        List<Map<String, Object>> rows = jdbcClient.sql(sql)
+                .params(username, applicationType)
+                .query()
+                .listOfRows();
+        return rows.isEmpty() ? null : rows.get(0);
+    }
 }

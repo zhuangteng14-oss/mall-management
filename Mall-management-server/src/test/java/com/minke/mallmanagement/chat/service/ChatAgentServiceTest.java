@@ -1,5 +1,7 @@
 package com.minke.mallmanagement.chat.service;
 
+import com.minke.mallmanagement.chat.model.ChatIntent;
+import com.minke.mallmanagement.chat.model.ResolvedIdentity;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
 import com.minke.mallmanagement.order.refund.service.OrderRefundService;
@@ -16,7 +18,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -28,13 +32,27 @@ class ChatAgentServiceTest {
 
     private OrderDao orderDao;
     private OrderRefundService refundService;
+    private IdentityResolver identityResolver;
+    private SessionMemoryService memoryService;
     private ChatAgentService service;
 
     @BeforeEach
     void setUp() {
         orderDao = mock(OrderDao.class);
         refundService = mock(OrderRefundService.class);
-        service = new ChatAgentService(orderDao, refundService, new OrderStateMachine());
+        identityResolver = mock(IdentityResolver.class);
+        memoryService = mock(SessionMemoryService.class);
+        // 默认：普通客户、无入驻申请；未登录走匿名。个别用例再覆盖。
+        when(identityResolver.resolve(anyString(), anyInt()))
+                .thenReturn(ResolvedIdentity.noApplication("demo_customer"));
+        when(identityResolver.resolve(isNull(), isNull()))
+                .thenReturn(ResolvedIdentity.anonymous());
+        service = new ChatAgentService(orderDao, refundService, new OrderStateMachine(),
+                identityResolver, memoryService);
+    }
+
+    private void identity(ResolvedIdentity resolved) {
+        when(identityResolver.resolve(anyString(), anyInt())).thenReturn(resolved);
     }
 
     private static Map<String, Object> order(String id, String product, int pay, int delivery, int receive) {
@@ -168,5 +186,323 @@ class ChatAgentServiceTest {
     void badInput() {
         assertThat(service.ask("   ", "c1", 1)).containsEntry("success", false);
         assertThat(service.ask("x".repeat(201), "c1", 1)).containsEntry("success", false);
+    }
+
+    // ==================== N2：六态话术 ====================
+
+    @Test
+    @DisplayName("N2 无申请：第一句固定「系统显示您当前是普通客户…」")
+    void noApplicationTalk() {
+        identity(ResolvedIdentity.noApplication("demo_customer"));
+
+        Map<String, Object> resp = service.ask("怎么开店", "c1", 1);
+
+        assertThat(String.valueOf(resp.get("reply")))
+                .startsWith("系统显示您当前是普通客户，还没有提交过入驻申请。");
+        assertThat(actionOf(resp)).containsEntry("routeKey", "apply");
+    }
+
+    @Test
+    @DisplayName("N2 审核中：报店铺名与提交时间，且不给漫游动作")
+    void pendingTalk() {
+        identity(ResolvedIdentity.pending("demo_customer", "米可数码店", "2026-10-20 10:00:00"));
+
+        Map<String, Object> resp = service.ask("怎么开店", "c1", 1);
+
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("系统显示您当前是「入驻审核中」", "店铺「米可数码店」", "于 2026-10-20 10:00:00",
+                        "正在等平台审核");
+        assertThat(resp).doesNotContainKey("action");
+    }
+
+    @Test
+    @DisplayName("N2 被拒：报驳回原因；空原因回「未填写」")
+    void rejectedTalk() {
+        identity(ResolvedIdentity.rejected("demo_customer", "资料不全"));
+
+        Map<String, Object> resp = service.ask("怎么开店", "c1", 1);
+
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("系统显示您当前是「入驻未通过」", "原因：资料不全");
+        assertThat(actionOf(resp)).containsEntry("label", "重新申请");
+
+        identity(ResolvedIdentity.rejected("demo_customer", ""));
+        assertThat(String.valueOf(service.ask("怎么开店", "c1", 1).get("reply")))
+                .contains("原因：未填写");
+    }
+
+    @Test
+    @DisplayName("N2 商家：报商家号")
+    void merchantTalk() {
+        identity(ResolvedIdentity.merchant("m1"));
+
+        Map<String, Object> resp = service.ask("怎么开店", "m1", 2);
+
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("系统显示您当前是商家。", "商家号：m1。");
+        assertThat(actionOf(resp)).containsEntry("routeKey", "apply");
+    }
+
+    @Test
+    @DisplayName("N2 品牌商家：报品牌名与有效期")
+    void brandTalk() {
+        identity(ResolvedIdentity.brand("m1", "米可", "2099-01-01 00:00:00"));
+
+        Map<String, Object> resp = service.ask("怎么开店", "m1", 2);
+
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("系统显示您当前是品牌商家。", "品牌：米可", "有效期至 2099-01-01 00:00:00");
+    }
+
+    @Test
+    @DisplayName("N2 匿名：先报未登录，再给开店引导")
+    void anonymousTalk() {
+        identity(ResolvedIdentity.anonymous());
+
+        Map<String, Object> resp = service.ask("怎么开店", null, null);
+
+        assertThat(String.valueOf(resp.get("reply"))).startsWith("您当前还未登录。");
+        assertThat(actionOf(resp)).containsEntry("routeKey", "apply");
+    }
+
+    @Test
+    @DisplayName("Q3 边界：role=3 回管理员话术，不参与入驻")
+    void adminBoundary() {
+        identity(ResolvedIdentity.admin());
+
+        Map<String, Object> resp = service.ask("怎么开店", "admin", 3);
+
+        assertThat(String.valueOf(resp.get("reply")))
+                .startsWith("您当前是管理员账号。");
+        assertThat(resp).doesNotContainKey("action");
+    }
+
+    @Test
+    @DisplayName("Q3 边界：role=1 但 settle 已 approved ⇒ 已降级/冻结商家")
+    void degradedBoundary() {
+        identity(ResolvedIdentity.degradedMerchant("demo_customer", "m1"));
+
+        Map<String, Object> resp = service.ask("怎么开店", "c1", 1);
+
+        assertThat(String.valueOf(resp.get("reply")))
+                .startsWith("您当前是已降级/冻结商家。");
+        assertThat(actionOf(resp)).containsEntry("label", "重新申请");
+    }
+
+    @Test
+    @DisplayName("增量-A 规则 2：自称商家但系统查出无申请 ⇒ 两个胶囊（查进度 / 去入驻）")
+    void claimMerchantButNoApplication() {
+        identity(ResolvedIdentity.noApplication("demo_customer"));
+
+        Map<String, Object> resp = service.ask("我是商家", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("IDENTITY_CLAIM");
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("系统显示您当前是普通客户", "可以查一下入驻进度");
+        assertThat(objectSuggestions(resp))
+                .extracting((m) -> m.get("routeKey"))
+                .containsExactly("applyStatus", "apply");
+    }
+
+    @Test
+    @DisplayName("自称商家且系统也判定商家 ⇒ 不出现「去入驻」胶囊")
+    void claimMerchantMatches() {
+        identity(ResolvedIdentity.merchant("m1"));
+
+        Map<String, Object> resp = service.ask("我是商家", "m1", 2);
+
+        assertThat(String.valueOf(resp.get("reply"))).contains("系统显示您当前是商家。");
+        assertThat(objectSuggestions(resp)).isEmpty();
+    }
+
+    // ==================== N3：ADD_TO_SECKILL 六态分支 ====================
+
+    @Test
+    @DisplayName("N3 商家：只给秒杀报名导航胶囊")
+    void seckillMerchant() {
+        identity(ResolvedIdentity.merchant("m1"));
+
+        Map<String, Object> resp = service.ask("我要报名秒杀", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("ADD_TO_SECKILL");
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("系统显示您当前是商家。", "带你去秒杀报名页");
+        assertThat(objectSuggestions(resp))
+                .extracting((m) -> m.get("routeKey"))
+                .containsExactly("seckill");
+    }
+
+    @Test
+    @DisplayName("N3 品牌商家：同样给秒杀报名导航")
+    void seckillBrand() {
+        identity(ResolvedIdentity.brand("m1", "米可", null));
+
+        Map<String, Object> resp = service.ask("限时抢购怎么参加", "m1", 2);
+
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("系统显示您当前是品牌商家。", "带你去秒杀报名页");
+        assertThat(objectSuggestions(resp))
+                .extracting((m) -> m.get("routeKey"))
+                .containsExactly("seckill");
+    }
+
+    @Test
+    @DisplayName("N3 无申请：复用开店漫游，不给秒杀导航")
+    void seckillNoApplication() {
+        identity(ResolvedIdentity.noApplication("demo_customer"));
+
+        Map<String, Object> resp = service.ask("报名活动", "c1", 1);
+
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("系统显示您当前是普通客户", "需要先完成商家入驻");
+        assertThat(actionOf(resp)).containsEntry("routeKey", "apply");
+        assertThat(objectSuggestions(resp))
+                .extracting((m) -> m.get("routeKey"))
+                .doesNotContain("seckill");
+    }
+
+    @Test
+    @DisplayName("N3 审核中：只答不导航")
+    void seckillPending() {
+        identity(ResolvedIdentity.pending("demo_customer", "米可数码店", "2026-10-20 10:00:00"));
+
+        Map<String, Object> resp = service.ask("我要参加秒杀", "c1", 1);
+
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("「入驻审核中」", "审核通过后就可以报名秒杀");
+        assertThat(resp).doesNotContainKey("action");
+        assertThat(objectSuggestions(resp))
+                .extracting((m) -> m.get("routeKey"))
+                .contains("applyStatus")
+                .doesNotContain("seckill");
+    }
+
+    @Test
+    @DisplayName("N3 被拒：给「重新申请」胶囊")
+    void seckillRejected() {
+        identity(ResolvedIdentity.rejected("demo_customer", "资料不全"));
+
+        Map<String, Object> resp = service.ask("加入秒杀活动", "c1", 1);
+
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("「入驻未通过」", "原因：资料不全", "重新申请");
+        assertThat(objectSuggestions(resp))
+                .extracting((m) -> m.get("routeKey"))
+                .containsExactly("apply");
+    }
+
+    @Test
+    @DisplayName("N3 匿名：给「登录后去报名」，由前端 pendingTour 续接")
+    void seckillAnonymous() {
+        identity(ResolvedIdentity.anonymous());
+
+        Map<String, Object> resp = service.ask("我要报名秒杀", null, null);
+
+        assertThat(String.valueOf(resp.get("reply")))
+                .startsWith("您当前还未登录。");
+        assertThat(objectSuggestions(resp))
+                .extracting((m) -> m.get("routeKey"))
+                .containsExactly("seckill");
+    }
+
+    @Test
+    @DisplayName("N3 边界：降级商家先重新入驻，管理员不参与")
+    void seckillBoundaries() {
+        identity(ResolvedIdentity.degradedMerchant("demo_customer", "m1"));
+        Map<String, Object> degraded = service.ask("我要报名秒杀", "c1", 1);
+        assertThat(String.valueOf(degraded.get("reply")))
+                .contains("已降级/冻结商家", "重新入驻通过后");
+        assertThat(objectSuggestions(degraded))
+                .extracting((m) -> m.get("routeKey"))
+                .containsExactly("apply");
+
+        identity(ResolvedIdentity.admin());
+        Map<String, Object> admin = service.ask("我要报名秒杀", "admin", 3);
+        assertThat(String.valueOf(admin.get("reply")))
+                .contains("管理员账号", "不参与秒杀报名");
+    }
+
+    // ==================== 增量：FAQ 兜底 ====================
+
+    @Test
+    @DisplayName("FAQ：政策问题先于售后意图（「拆封了能退货吗」不会被当成查售后）")
+    void faqPolicyBeatsRefund() {
+        Map<String, Object> resp = service.ask("拆封了能退货吗？", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("FAQ");
+        assertThat(String.valueOf(resp.get("reply")))
+                .isEqualTo("支持7天无理由，但需保证不影响二次销售哦。");
+        verify(refundService, org.mockito.Mockito.never())
+                .myRefunds(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("FAQ：UNKNOWN 命中运费问题 ⇒ 标准答案")
+    void faqUnknownShipping() {
+        Map<String, Object> resp = service.ask("运费怎么算", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("FAQ");
+        assertThat(String.valueOf(resp.get("reply"))).isEqualTo("本店满99包邮，偏远地区除外。");
+    }
+
+    @Test
+    @DisplayName("FAQ 未命中：仍走原 UNKNOWN 兜底")
+    void faqMissFallsBack() {
+        Map<String, Object> resp = service.ask("今天天气不错", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("UNKNOWN");
+        assertThat(String.valueOf(resp.get("reply"))).contains("我暂时听不懂这句话");
+    }
+
+    // ==================== 增量：短期记忆 ====================
+
+    @Test
+    @DisplayName("记忆：上一轮查订单，这一轮「到哪了」复用上一轮单号")
+    void followUpReusesPreviousOrder() {
+        when(memoryService.lastContext("c1"))
+                .thenReturn(new SessionMemoryService.Context(ChatIntent.ORDER_QUERY, "r2vfwK6z3E"));
+        when(orderDao.countByCustomer("c1")).thenReturn(1L);
+        when(orderDao.selectRecentByCustomer(eq("c1"), anyInt()))
+                .thenReturn(List.of(order("r2vfwK6z3E", "无线蓝牙耳机", 1, 1, 0)));
+        when(orderDao.selectByOrderIdAndCustomer("c1", "r2vfwK6z3E"))
+                .thenReturn(order("r2vfwK6z3E", "无线蓝牙耳机", 1, 1, 0));
+
+        Map<String, Object> resp = service.ask("到哪了？", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("ORDER_QUERY");
+        assertThat(String.valueOf(resp.get("reply"))).contains("无线蓝牙耳机", "已发货（待收货）");
+        verify(memoryService).remember(eq("c1"), eq("到哪了？"), eq(ChatIntent.ORDER_QUERY),
+                eq("r2vfwK6z3E"), anyString());
+    }
+
+    @Test
+    @DisplayName("记忆：没有上下文时「到哪了」仍是 UNKNOWN，不乱猜")
+    void followUpWithoutContextStaysUnknown() {
+        when(memoryService.lastContext("c1")).thenReturn(null);
+
+        Map<String, Object> resp = service.ask("到哪了？", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("UNKNOWN");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> actionOf(Map<String, Object> resp) {
+        Object action = resp.get("action");
+        return action instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> objectSuggestions(Map<String, Object> resp) {
+        Object raw = resp.get("suggestions");
+        if (!(raw instanceof List<?> list)) {
+            return List.of();
+        }
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Object item : list) {
+            if (item instanceof Map<?, ?> map) {
+                out.add((Map<String, Object>) map);
+            }
+        }
+        return out;
     }
 }

@@ -95,4 +95,39 @@ class ChatIntentRecognizerTest {
         assertThat(m.explicitOrderId()).isTrue();
         assertThat(m.orderId()).isEqualTo("r2vfwk6z3e");
     }
+
+    @Test
+    @DisplayName("N3 秒杀：报名/限时抢购/上架到秒杀都走 ADD_TO_SECKILL")
+    void seckillIntent() {
+        assertThat(ChatIntentRecognizer.recognize("我要报名秒杀").intent())
+                .isEqualTo(ChatIntent.ADD_TO_SECKILL);
+        assertThat(ChatIntentRecognizer.recognize("限时抢购怎么参加").intent())
+                .isEqualTo(ChatIntent.ADD_TO_SECKILL);
+        assertThat(ChatIntentRecognizer.recognize("把商品上架到秒杀").intent())
+                .isEqualTo(ChatIntent.ADD_TO_SECKILL);
+        assertThat(ChatIntentRecognizer.recognize("报名活动").intent())
+                .isEqualTo(ChatIntent.ADD_TO_SECKILL);
+    }
+
+    @Test
+    @DisplayName("N3 秒杀优先于开店：「上架到秒杀」不是入驻")
+    void seckillBeatsOpenStore() {
+        assertThat(ChatIntentRecognizer.recognize("上架").intent())
+                .isEqualTo(ChatIntent.OPEN_STORE);
+        assertThat(ChatIntentRecognizer.recognize("上架到秒杀").intent())
+                .isEqualTo(ChatIntent.ADD_TO_SECKILL);
+    }
+
+    @Test
+    @DisplayName("增量-A 规则 2：自述身份单独成意图；带开店关键词仍走开店")
+    void identityClaim() {
+        assertThat(ChatIntentRecognizer.recognize("我是商家").intent())
+                .isEqualTo(ChatIntent.IDENTITY_CLAIM);
+        assertThat(ChatIntentRecognizer.recognize("我是品牌商家").intent())
+                .isEqualTo(ChatIntent.IDENTITY_CLAIM);
+        assertThat(ChatIntentRecognizer.recognize("我是普通用户").intent())
+                .isEqualTo(ChatIntent.IDENTITY_CLAIM);
+        assertThat(ChatIntentRecognizer.recognize("我是商家，怎么开店").intent())
+                .isEqualTo(ChatIntent.OPEN_STORE);
+    }
 }

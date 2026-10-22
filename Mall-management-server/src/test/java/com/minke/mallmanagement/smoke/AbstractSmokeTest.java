@@ -486,7 +486,7 @@ import static org.mockito.Mockito.when;
         // 照本文件既有处置：**不 @Import 就整片起不来**。两个类用全限定名写在同一行，
         // 避免加 import 行让本文件被文档按「文件:行号」引用的位置集体下移（同 eventPublisher 那条的处置）。
         com.minke.mallmanagement.order.refund.dao.OrderRefundDao.class,
-        com.minke.mallmanagement.order.refund.service.OrderRefundService.class, com.minke.mallmanagement.chat.service.ChatAgentService.class,
+        com.minke.mallmanagement.order.refund.service.OrderRefundService.class, com.minke.mallmanagement.chat.service.ChatAgentService.class, com.minke.mallmanagement.chat.service.IdentityResolver.class, com.minke.mallmanagement.chat.service.SessionMemoryService.class,
         // 批四第二批（第三批商业闭环，2026-10-19）：四个新 Controller（`DiscountController` /
         // `BrandController` / `MemberController` / `WalletController`）自动被切片扫入，
         // 各吃一个新 @Service；同时 `GoodsService` / `MerchantApplicationService` /
