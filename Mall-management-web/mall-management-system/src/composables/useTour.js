@@ -16,6 +16,8 @@ const TTL_MS = 15 * 60 * 1000
 
 const APPLY_PATH = { customer: '/customer/user/apply', merchant: '/merchant/user/apply' }
 const ORDERS_PATH = { customer: '/customer/orders', merchant: '/merchant/orders' }
+/** 商家秒杀报名页（N3 / Q5=A：只导航，不写库）。 */
+const SECKILL_PATH = '/merchant/seckill'
 
 export function isMerchantRole() {
   return String(getRole() || '') === '2'
@@ -31,9 +33,14 @@ export function applyPath() {
   return isMerchantRole() ? APPLY_PATH.merchant : APPLY_PATH.customer
 }
 
-export function savePendingTour(tourId = 'open-store', routeKey = 'apply') {
+/** 秒杀报名页落点（只有商家壳有这条路由，Q5 表里也只对商家给导航）。 */
+export function seckillPath() {
+  return SECKILL_PATH
+}
+
+export function savePendingTour(tourId = 'open-store', routeKey = 'apply', resume = null) {
   try {
-    sessionStorage.setItem(PENDING_KEY, JSON.stringify({ tourId, routeKey, at: Date.now() }))
+    sessionStorage.setItem(PENDING_KEY, JSON.stringify({ tourId, routeKey, resume, at: Date.now() }))
   } catch (e) { /* 隐私模式 / 存储满 ⇒ 本次不跨页，但不阻断跳转本身 */ }
 }
 
@@ -66,10 +73,18 @@ export function clearPendingTour() {
   } catch (e) { /* 无存储可用 ⇒ 本来也没有待办 */ }
 }
 
-/** 登录回来后，如果待办还在、当前又不在申请页，按**真实角色**把用户续到对应的申请页。 */
+/**
+ * 登录回来后按**真实角色**续接待办：
+ * · 开店待办 ⇒ 对应角色的申请页；
+ * · 秒杀待办 ⇒ 只有商家能回 `/merchant/seckill`；客户返回 null，由 ChatWidget 重问一句
+ *   「我要报名秒杀」，让后端按登录后的身份重新分支（Q5 的 ANONYMOUS 行）。
+ */
 export function resumePathAfterLogin(currentPath) {
-  if (!isLoggedIn() || !readPendingTour()) return null
-  const target = applyPath()
+  if (!isLoggedIn()) return null
+  const pending = readPendingTour()
+  if (!pending) return null
+  if (pending.routeKey === 'seckill' && !isMerchantRole()) return null
+  const target = pending.routeKey === 'seckill' ? seckillPath() : applyPath()
   return currentPath === target ? null : target
 }
 

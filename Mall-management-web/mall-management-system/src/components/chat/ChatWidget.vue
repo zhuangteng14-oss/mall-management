@@ -74,10 +74,12 @@ import { UnauthorizedError } from '../../api/http'
 import {
   applyPath,
   clearPendingTour,
+  isMerchantRole,
   ordersPath,
   readPendingTour,
   resumePathAfterLogin,
   savePendingTour,
+  seckillPath,
   startOpenStoreTour,
 } from '../../composables/useTour'
 
@@ -119,6 +121,9 @@ function normalize(p) {
 }
 function isApplyPath(p) {
   return normalize(p).endsWith('/user/apply')
+}
+function isSeckillPath(p) {
+  return normalize(p) === normalize(seckillPath())
 }
 function isLoginPath(p) {
   const n = normalize(p)
@@ -221,7 +226,7 @@ function onRetry(msg) {
 }
 
 function onSuggestion(s) {
-  if (s && typeof s === 'object' && s.routeKey) {
+  if (s && typeof s === 'object') {
     if (s.routeKey === 'apply') {
       onAction({ type: 'tour', tourId: 'open-store', routeKey: 'apply', label: s.label })
       return
@@ -231,6 +236,23 @@ function onSuggestion(s) {
       router.push(ordersPath()).catch(() => {})
       return
     }
+    if (s.routeKey === 'seckill') {
+      startSeckill()
+      return
+    }
+    if (s.routeKey === 'applyStatus') {
+      // 「查入驻进度」= 只去申请页看状态，不自动开漫游（pending 状态没有可填的表）。
+      close()
+      router.push(applyPath()).catch(() => {})
+      return
+    }
+    // 未知 routeKey（R6 / N7）：回退到 label 当普通消息发送。
+    // ⚠️ 绝不能落到 send(String(s)) —— 那会把对象串成 "[object Object]" 发给后端。
+    if (s.label) {
+      send(s.label)
+      return
+    }
+    return
   }
   send(String(s))
 }
@@ -246,9 +268,25 @@ async function onAction(action) {
   router.push(target).catch(() => {})
 }
 
+/**
+ * 秒杀报名（N3）：只导航，不猜商品/价格、不写秒杀表。
+ * 未登录时先存待办再 push；路由守卫会送 /login，登录回来由 watcher 按真实角色续接。
+ */
+function startSeckill() {
+  close()
+  if (isSeckillPath(route.path)) {
+    clearPendingTour()
+    return
+  }
+  savePendingTour('add-to-seckill', 'seckill', 'ADD_TO_SECKILL')
+  router.push(seckillPath()).catch(() => {})
+}
+
 async function startTour() {
   if (tourRunning.value || tourStarting.value) return
-  if (!readPendingTour()) return
+  const pending = readPendingTour()
+  // 只有「开店」待办才开漫游；秒杀待办绝不能误触发申请页高亮。
+  if (!pending || pending.routeKey !== 'apply') return
   tourStarting.value = true
   const tour = await startOpenStoreTour({
     onDone: () => {
@@ -267,18 +305,33 @@ watch(
   async (to, from) => {
     if (hidden.value) close()
 
-    // 登录回跳：待办还在 ⇒ 按**真实角色**续到对应申请页（客户 / 商家两条路径不同）。
+    // 登录回跳：待办还在 ⇒ 按**真实角色**续接。
     if (isLoginPath(from) && !isLoginPath(to)) {
+      const pending = readPendingTour()
+      // 秒杀待办 + 登录后仍是客户：不硬闯商家壳（壳归属守卫会踢回首页），
+      // 直接重问一句，让后端按登录后的真实身份重新走六态分支。
+      if (pending && pending.routeKey === 'seckill' && !isMerchantRole()) {
+        clearPendingTour()
+        openChat()
+        send('我要报名秒杀')
+        return
+      }
       const target = resumePathAfterLogin(normalize(to))
       if (target) {
         router.push(target).catch(() => {})
         return
       }
+      if (pending && pending.routeKey === 'seckill') clearPendingTour()
     }
 
     if (isApplyPath(to)) {
       const pending = readPendingTour()
       if (pending && pending.routeKey === 'apply') await startTour()
+    }
+    if (isSeckillPath(to)) {
+      // 商家已到达秒杀页 ⇒ 待办使命结束，别让它影响下一次导航。
+      const pending = readPendingTour()
+      if (pending && pending.routeKey === 'seckill') clearPendingTour()
     }
   },
 )
@@ -290,7 +343,9 @@ function onKeydown(e) {
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   // 直接刷新在申请页 / 从别处回到申请页：待办也可能已经在了。
-  if (isApplyPath(route.path) && readPendingTour()) startTour()
+  const pending = readPendingTour()
+  if (isApplyPath(route.path) && pending && pending.routeKey === 'apply') startTour()
+  if (isSeckillPath(route.path) && pending && pending.routeKey === 'seckill') clearPendingTour()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
