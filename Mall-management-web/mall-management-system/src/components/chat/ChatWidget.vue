@@ -641,4 +641,14 @@ onBeforeUnmount(() => {
 }
 .tour-bar-prev:hover { border-color: var(--brand, #3b7966); }
 .tour-bar-next:hover { background: var(--brand-ink, #275e4e); }
+
+/* ── 把控制条从 driver 的「全局禁点」里救回来（2026-10-22 实测修） ──
+   driver 一 drive() 就给 body 挂 .driver-active，并启用自带规则
+     `.driver-active * { pointer-events: none }`（只豁免被高亮元素与 .driver-popover）。
+   我们的 `.tour-bar` 是 body 级节点 ⇒ 视觉上在、三个按钮全部点不动（真鼠标点击
+   直接穿透到遮罩上；JS 的 el.click() 不经过命中测试，所以探针一直没抓到）。
+   `.driver-active .tour-bar` 的特异性 (0,2,0) 高于 `.driver-active *` (0,1,0)，
+   不依赖样式插入顺序。 */
+.driver-active .tour-bar,
+.driver-active .tour-bar * { pointer-events: auto; }
 </style>

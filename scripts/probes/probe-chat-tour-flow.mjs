@@ -128,9 +128,48 @@ const active = (sel) => `document.querySelector(${JSON.stringify(sel)})?.classLi
 const progress = `document.querySelector('.tour-bar-step')?.textContent?.trim() || ''`
 const flowState = `sessionStorage.getItem('mall.chat.tourFlow.v1')`
 
+// ⚠️ 2026-10-22 实测教训：`.tour-bar` 挂在 body 下，driver 的 `.driver-active *`
+//    会把它的 pointer-events 置成 none —— 视觉在、真鼠标点不动。JS 的 el.click()
+//    不经过命中测试，全绿也发现不了 ⇒ 这里一律用 CDP 真鼠标点击。
+async function realClick(sel) {
+  const point = await b.evalJS(`(() => {
+    const el = document.querySelector(${JSON.stringify(sel)})
+    if (!el || el.style.display === 'none') return null
+    const r = el.getBoundingClientRect()
+    if (r.width < 1 || r.height < 1) return null
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
+  })()`)
+  if (!point) return false
+  await b.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y, button: 'none' })
+  await b.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 })
+  await b.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 })
+  return true
+}
+
+/** 控制条三个按钮的命中情况：中心点最上层元素必须是按钮自己。 */
+async function barHit() {
+  return b.evalJS(`(() => {
+    const out = {}
+    for (const sel of ['.tour-bar-skip', '.tour-bar-prev', '.tour-bar-next']) {
+      const el = document.querySelector(sel)
+      if (!el || el.style.display === 'none') { out[sel] = { shown: false }; continue }
+      const r = el.getBoundingClientRect()
+      const top = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2))
+      out[sel] = {
+        shown: true,
+        pe: getComputedStyle(el).pointerEvents,
+        ok: top === el || el.contains(top),
+        top: top ? top.tagName + '.' + (typeof top.className === 'string' ? top.className : '') : null,
+      }
+    }
+    return out
+  })()`)
+}
+
 async function clickNext() {
-  await b.evalJS(`document.querySelector('.tour-bar-next')?.click()`)
+  const clicked = await realClick('.tour-bar-next')
   await sleep(250)
+  return clicked
 }
 
 async function waitStep(sel, progressText, timeout = 12000) {
@@ -231,10 +270,33 @@ try {
   ok('Step7：高亮提交审核按钮', s7.hit, s7)
   await b.shot(path.join(OUT, 'flow-07-submit.png'))
 
-  await clickNext()
+  // 回归（2026-10-22 用户实测 bug）：最后一步「跳过 / 上一步 / 完成」必须能被**真鼠标**
+  // 命中。根因是 driver 给 body 挂 .driver-active 后 `.driver-active *` 把 body 级
+  // `.tour-bar` 的 pointer-events 置成了 none；JS 的 el.click() 测不出来。
+  const lastHit = await barHit()
+  ok('Step7：三个按钮真鼠标可命中（pointer-events = auto）',
+    ['skip', 'prev', 'next'].every((k) => lastHit[`.tour-bar-${k}`]?.ok && lastHit[`.tour-bar-${k}`].pe === 'auto'),
+    lastHit)
+
+  const finished = await clickNext()
   const closed = await waitFor(barGone, 5000)
-  ok('完成后浮层消失且流程存档清空',
-    closed && !(await b.evalJS(flowState)), { closed, flow: await b.evalJS(flowState) })
+  const finishState = await b.evalJS(flowState)
+  await sleep(950) // 球飞回右下角 0.8s
+  const home = await b.evalJS(`(() => {
+    const sp = document.querySelector('.chat-root .ball')
+    const de = document.documentElement
+    const r = sp.getBoundingClientRect()
+    return {
+      x: Math.round(r.left), y: Math.round(r.top),
+      wantX: de.clientWidth - 24 - 56, wantY: de.clientHeight - 24 - 56,
+      tourMode: document.querySelector('.chat-root').classList.contains('tour-mode'),
+      overlay: !!document.querySelector('.driver-overlay'),
+    }
+  })()`)
+  ok('最后一步点「完成」⇒ 浮层消失、存档清空、同一颗球飞回右下角',
+    finished && closed && finishState === null && home.tourMode === false && home.overlay === false
+      && Math.hypot(home.x - home.wantX, home.y - home.wantY) <= 2,
+    { finished, closed, flow: finishState, home })
 
   // ── ② 直接导航进发布页（无流程）⇒ 不出现高亮 ────────────────────────────
   await goHash('#/merchant/user/add')
@@ -251,13 +313,13 @@ try {
     { ...s8, hash: await b.evalJS(`location.hash`) })
   await b.shot(path.join(OUT, 'flow-08-resume-image.png'))
 
-  await b.evalJS(`document.querySelector('.tour-bar-prev')?.click()`)
+  await realClick('.tour-bar-prev')
   const back = await waitStep('#tour-menu-add', '第 2 步 / 共 7 步', 12000)
   ok('「上一步」跨页回到个人中心并高亮上架入口',
     back.hit && (await b.evalJS(`location.hash`)) === '#/merchant/user',
     { ...back, hash: await b.evalJS(`location.hash`) })
   await b.shot(path.join(OUT, 'flow-09-prev.png'))
-  await b.evalJS(`document.querySelector('.tour-bar-skip')?.click()`)
+  await realClick('.tour-bar-skip')
   await sleep(950)
 
   // ── ④ 个人中心点胶囊 ⇒ 第 1 步就是「上架商品」，不再高亮顶栏 ─────────────
@@ -267,7 +329,7 @@ try {
     personalClick && s9.hit && (await b.evalJS(`location.hash`)) === '#/merchant/user',
     { ...s9, hash: await b.evalJS(`location.hash`) })
   await b.shot(path.join(OUT, 'flow-10-personal-start.png'))
-  await b.evalJS(`document.querySelector('.tour-bar-skip')?.click()`)
+  await realClick('.tour-bar-skip')
   await sleep(950)
 
   // ── ⑤ 秒杀两步流（用户点胶囊后允许直接到报名页）────────────────────────
@@ -296,7 +358,7 @@ try {
   ok('「怎么开店」落入驻申请页，不会误跳发布页',
     hasAction && acted && applyHash === '#/merchant/user/apply',
     { hasAction, acted, hash: applyHash })
-  await b.evalJS(`document.querySelector('.tour-bar-skip')?.click()`)
+  await realClick('.tour-bar-skip')
 
   ok('页面无未捕获异常', pageErrors.length === 0, { pageErrors })
 } catch (e) {
