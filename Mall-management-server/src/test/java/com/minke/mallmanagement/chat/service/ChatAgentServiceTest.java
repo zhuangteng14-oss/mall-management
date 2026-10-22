@@ -2,12 +2,14 @@ package com.minke.mallmanagement.chat.service;
 
 import com.minke.mallmanagement.chat.model.ChatIntent;
 import com.minke.mallmanagement.chat.model.ResolvedIdentity;
+import com.minke.mallmanagement.comment.dao.CommentDao;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
 import com.minke.mallmanagement.order.refund.service.OrderRefundService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -21,6 +23,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -36,6 +39,8 @@ class ChatAgentServiceTest {
     private IdentityResolver identityResolver;
     private SessionMemoryService memoryService;
     private LlmIntentClassifier llmClassifier;
+    private CommentDao commentDao;
+    private LlmReplyComposer replyComposer;
     private ChatAgentService service;
 
     @BeforeEach
@@ -45,14 +50,17 @@ class ChatAgentServiceTest {
         identityResolver = mock(IdentityResolver.class);
         memoryService = mock(SessionMemoryService.class);
         llmClassifier = mock(LlmIntentClassifier.class);
+        commentDao = mock(CommentDao.class);
+        replyComposer = mock(LlmReplyComposer.class);
         // 默认：LLM 未启用（Mockito 布尔默认 false）⇒ 既有用例全部走规则引擎，行为与阶段一之前一致。
+        // 默认：话术生成也不启用 ⇒ 走确定性模板，断言可以逐字写。
         // 默认：普通客户、无入驻申请；未登录走匿名。个别用例再覆盖。
         when(identityResolver.resolve(anyString(), anyInt()))
                 .thenReturn(ResolvedIdentity.noApplication("demo_customer"));
         when(identityResolver.resolve(isNull(), isNull()))
                 .thenReturn(ResolvedIdentity.anonymous());
         service = new ChatAgentService(orderDao, refundService, new OrderStateMachine(),
-                identityResolver, memoryService, llmClassifier);
+                identityResolver, memoryService, llmClassifier, commentDao, replyComposer);
     }
 
     /** 打开 LLM 路由；具体分类结果由用例再 stub {@code classify}。 */
@@ -713,7 +721,7 @@ class ChatAgentServiceTest {
     @DisplayName("LLM 不可用：规则降级仍能从路由字典命中页面（不新增意图正则）")
     void ruleFallbackNavigatesFromCatalog() {
         // 默认 llmClassifier.isEnabled()=false ⇒ 直接走 byRules。
-        Map<String, Object> resp = service.ask("我要看评论", "m1", 2);
+        Map<String, Object> resp = service.ask("我想改一下那个 299 元耳机的价格", "m1", 2);
 
         assertThat(resp.get("intent")).isEqualTo("NAVIGATE");
         assertThat(actionOf(resp))
@@ -725,10 +733,24 @@ class ChatAgentServiceTest {
     @DisplayName("NavGraph：模型把小问题判成 ORDER_QUERY，字典里有明确页面说法 ⇒ 改判导航")
     void catalogOverridesWrongDataIntent() {
         llmEnabled();
-        when(llmClassifier.classify(eq("我要看评论"), any(), isNull()))
+        when(llmClassifier.classify(eq("怎么处理退款"), any(), isNull()))
                 .thenReturn(new LlmIntentClassifier.Result(ChatIntent.ORDER_QUERY, null, false));
 
-        Map<String, Object> resp = service.ask("我要看评论", "c1", 1);
+        Map<String, Object> resp = service.ask("怎么处理退款", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("NAVIGATE");
+        assertThat(actionOf(resp)).containsEntry("targetPath", "/customer/orders");
+    }
+
+    @Test
+    @DisplayName("NavGraph：售后句模型选了别的页面（会员中心）⇒ 按字典纠正到我的订单")
+    void catalogOverridesWrongNavigateTarget() {
+        llmEnabled();
+        when(llmClassifier.classify(eq("怎么处理退款"), any(), isNull()))
+                .thenReturn(new LlmIntentClassifier.Result(
+                        ChatIntent.NAVIGATE, null, false, "/customer/user/member"));
+
+        Map<String, Object> resp = service.ask("怎么处理退款", "c1", 1);
 
         assertThat(resp.get("intent")).isEqualTo("NAVIGATE");
         assertThat(actionOf(resp)).containsEntry("targetPath", "/customer/orders");
@@ -776,6 +798,147 @@ class ChatAgentServiceTest {
         Map<String, Object> resp = service.ask("我要看商家报表", "c1", 1);
 
         assertThat(actionOf(resp)).doesNotContainEntry("type", "navigate");
+    }
+
+    // ==================== 业务工具挂载（2026-10-22）：评论数据 + 话术回喂 ====================
+
+    @Test
+    @DisplayName("工具挂载：商家「我要看评论」⇒ COMMENT_QUERY 真查 DAO，播报条数与未回复数，不再导航")
+    void commentQueryReadsRealMerchantComments() {
+        when(commentDao.countByMerchant("m1")).thenReturn(5L);
+        when(commentDao.countUnansweredByMerchant("m1")).thenReturn(2L);
+        when(commentDao.selectRecentByMerchant(eq("m1"), anyInt())).thenReturn(List.of(
+                commentRow(101, "review", 5, "很好用，续航给力", "无线蓝牙耳机", 1),
+                commentRow(102, "question", 0, "支持降噪吗？", "机械键盘", 0)));
+
+        Map<String, Object> resp = service.ask("我要看评论", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("COMMENT_QUERY");
+        assertThat(actionOf(resp)).doesNotContainEntry("type", "navigate");
+        String reply = String.valueOf(resp.get("reply"));
+        assertThat(reply).contains("5 条").contains("2 条还没有商家回复")
+                .contains("无线蓝牙耳机").contains("商家").doesNotContain("带你去");
+        Map<String, Object> data = dataOf(resp);
+        assertThat(data).containsEntry("scope", "merchant").containsEntry("total", 5L)
+                .containsEntry("unanswered", 2L);
+        List<Map<String, Object>> comments = commentsOf(data);
+        assertThat(comments).hasSize(2);
+        assertThat(comments.get(0)).containsEntry("kindLabel", "评价").containsEntry("rating", 5)
+                .containsEntry("merchantReplied", true);
+        assertThat(comments.get(1)).containsEntry("kindLabel", "提问").containsEntry("merchantReplied", false);
+        // 商家分支不该去换算登录名（那是客户分支的事）。
+        verify(commentDao, never()).selectUsernameByUserId(anyString());
+    }
+
+    @Test
+    @DisplayName("工具挂载：客户「看评论」按登录名查自己的评论，并说明商家是否回复")
+    void commentQueryReadsOwnComments() {
+        when(commentDao.selectUsernameByUserId("c1")).thenReturn("1111");
+        when(commentDao.countByAuthor("1111")).thenReturn(1L);
+        when(commentDao.selectRecentByAuthor(eq("1111"), anyInt())).thenReturn(List.of(
+                commentRow(201, "review", 4, "做工扎实，充电快", "Type-C 快充数据线", 1)));
+
+        Map<String, Object> resp = service.ask("我发过的评论", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("COMMENT_QUERY");
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("1 条").contains("Type-C 快充数据线").contains("商家已经回复");
+        assertThat(dataOf(resp)).containsEntry("scope", "customer").containsEntry("total", 1L)
+                .doesNotContainKey("unanswered");
+        verify(commentDao, never()).countByMerchant(anyString());
+    }
+
+    @Test
+    @DisplayName("工具挂载：模型把「我要看评论」判成 NAVIGATE / ORDER_QUERY，一律纠偏到 COMMENT_QUERY")
+    void commentQueryOverridesWrongModelIntent() {
+        llmEnabled();
+        when(llmClassifier.classify(eq("我要看评论"), any(), isNull()))
+                .thenReturn(new LlmIntentClassifier.Result(
+                        ChatIntent.NAVIGATE, null, false, "/customer/orders"));
+        when(commentDao.selectUsernameByUserId("c1")).thenReturn("1111");
+        when(commentDao.countByAuthor("1111")).thenReturn(0L);
+
+        Map<String, Object> resp = service.ask("我要看评论", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("COMMENT_QUERY");
+        assertThat(actionOf(resp)).doesNotContainEntry("type", "navigate");
+        assertThat(String.valueOf(resp.get("reply"))).contains("还没有发表过评论");
+    }
+
+    @Test
+    @DisplayName("工具挂载：真实数据回喂模型生成话术；模型话术优先于模板，事实里带真数字")
+    void composerReceivesRealCommentFacts() {
+        when(replyComposer.isEnabled()).thenReturn(true);
+        when(replyComposer.compose(anyString(), eq("COMMENT_QUERY"), anyString()))
+                .thenReturn("您店里最近有买家留言，还有 2 条没回，抽空看看吧～");
+        when(commentDao.countByMerchant("m1")).thenReturn(5L);
+        when(commentDao.countUnansweredByMerchant("m1")).thenReturn(2L);
+        when(commentDao.selectRecentByMerchant(eq("m1"), anyInt())).thenReturn(List.of(
+                commentRow(101, "review", 5, "很好用，续航给力", "无线蓝牙耳机", 0)));
+
+        Map<String, Object> resp = service.ask("有没有人评论我的商品", "m1", 2);
+
+        assertThat(resp.get("reply")).isEqualTo("您店里最近有买家留言，还有 2 条没回，抽空看看吧～");
+        ArgumentCaptor<String> facts = ArgumentCaptor.forClass(String.class);
+        verify(replyComposer).compose(anyString(), eq("COMMENT_QUERY"), facts.capture());
+        assertThat(facts.getValue()).contains("总数：5").contains("还没有商家回复：2")
+                .contains("无线蓝牙耳机").contains("很好用，续航给力");
+    }
+
+    @Test
+    @DisplayName("工具挂载：订单同样走「查库 → 事实 → 模型话术」，但 data/胶囊保持原契约")
+    void composerReceivesRealOrderFacts() {
+        when(replyComposer.isEnabled()).thenReturn(true);
+        when(replyComposer.compose(anyString(), eq("ORDER_QUERY"), anyString()))
+                .thenReturn("您最近有一笔耳机订单，正在等商家发货。");
+        when(orderDao.countByCustomer("c1")).thenReturn(1L);
+        when(orderDao.selectRecentByCustomer(eq("c1"), anyInt()))
+                .thenReturn(List.of(order("r2vfwK6z3E", "无线蓝牙耳机", 1, 1, 0)));
+
+        Map<String, Object> resp = service.ask("查我的订单", "c1", 1);
+
+        assertThat(resp.get("reply")).isEqualTo("您最近有一笔耳机订单，正在等商家发货。");
+        assertThat(dataOf(resp)).containsEntry("total", 1L);
+        assertThat(objectSuggestions(resp)).anySatisfy(s -> assertThat(s).containsEntry("routeKey", "orders"));
+        ArgumentCaptor<String> facts = ArgumentCaptor.forClass(String.class);
+        verify(replyComposer).compose(anyString(), eq("ORDER_QUERY"), facts.capture());
+        assertThat(facts.getValue()).contains("单号 r2vfwK6z3E").contains("已发货（待收货）");
+    }
+
+    private static Map<String, Object> commentRow(long id, String kind, int rating, String content,
+                                                  String goods, int merchantReplies) {
+        Map<String, Object> row = new HashMap<>();
+        row.put("Id", id);
+        row.put("Kind", kind);
+        row.put("Rating", rating);
+        row.put("Content", content);
+        row.put("GoodName", goods);
+        row.put("CreatedAt", "2026-10-20 10:00:00");
+        row.put("ReplyCount", merchantReplies);
+        row.put("MerchantReplies", merchantReplies);
+        row.put("TargetId", String.valueOf(id + 1000));
+        return row;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> dataOf(Map<String, Object> resp) {
+        Object data = resp.get("data");
+        return data instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> commentsOf(Map<String, Object> data) {
+        Object raw = data.get("comments");
+        if (!(raw instanceof List<?> list)) {
+            return List.of();
+        }
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Object item : list) {
+            if (item instanceof Map<?, ?> map) {
+                out.add((Map<String, Object>) map);
+            }
+        }
+        return out;
     }
 
     @SuppressWarnings("unchecked")

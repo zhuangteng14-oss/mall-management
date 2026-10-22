@@ -1,0 +1,12 @@
+PASS  商家登录落 /merchant  {"hash":"#/merchant"}
+PASS  引导已开到第 1 步（高亮首页「用户中心」）  {"clicked":{"clicked":true,"label":"↗带我去「上架商品」"},"hit":true,"progress":"第 1 步 / 共 7 步","hash":"#/merchant"}
+PASS  ① 点击高亮「用户中心」⇒ 页面跳转后自动高亮「上架商品」（没点下一步）  {"point":{"x":1314,"y":33},"autoMs":1116,"state":"{\"flowId\":\"publish\",\"index\":1,\"at\":1792670869166}","hash":"#/merchant/user","progress":"第 2 步 / 共 7 步"}
+PASS  ② 切步时小助手是「滑过去」的：0.8s 内采到多个中间位置  {"samples":[{"t":8,"x":82,"y":560,"ms":"800"},{"t":73,"x":82,"y":560,"ms":"800"},{"t":137,"x":85,"y":557,"ms":"800"},{"t":213,"x":98,"y":544,"ms":"800"},{"t":276,"x":117,"y":525,"ms":"800"},{"t":339,"x":136,"y":507,"ms":"800"},{"t":400,"x":165,"y":478,"ms":"800"},{"t":463,"x":198,"y":445,"ms":"800"},{"t":526,"x":231,"y":413,"ms":"800"},{"t":588,"x":254,"y":390,"ms":"800"},{"t":650,"x":279,"y":365,"ms":"800"},{"t":712,"x":298,"y":347,"ms":"800"},{"t":775,"x":310,"y":335,"ms":"800"},{"t":837,"x":314,"y":331,"ms":"800"},{"t":918,"x":315,"y":330,"ms":"800"}],"distinct":14}
+PASS  ② 飞行 0.6s 内没有遮罩 / 弹窗，落位后才亮高亮  {"overlayDuringFlight":[],"finalPopover":true,"to":[315,330]}
+PASS  ② 落点 = 目标元素上方 60px（对照实测 rect）  {"landed":{"x":315,"y":330},"to":[315,330],"rect":{"left":315,"top":390},"expect":{"x":315,"y":330},"landErr":0}
+PASS  ② 飞到发布页后第 3 步高亮「商品主图」  {"hit":true,"progress":"第 3 步 / 共 7 步","hash":"#/merchant/user/add"}
+PASS  ③ 帧序列里精灵位置逐帧变化（不是瞬间出现）  {"frames":[{"t":2,"x":315,"y":330,"ms":"800","popover":false},{"t":161,"x":315,"y":327,"ms":"800","popover":false},{"t":301,"x":315,"y":313,"ms":"800","popover":false},{"t":456,"x":315,"y":287,"ms":"800","popover":false},{"t":613,"x":315,"y":262,"ms":"800","popover":false},{"t":753,"x":315,"y":247,"ms":"800","popover":false}],"distinct":6}
+PASS  ④ 关掉漫游后监听被摘掉：点击照常跳转，2.5s 内不再自动高亮  {"cleared":null,"navOk":true,"popAfter":false,"hash":"#/merchant/user"}
+PASS  页面无未捕获异常  {"pageErrors":[]}
+
+advance: 10/10 PASS

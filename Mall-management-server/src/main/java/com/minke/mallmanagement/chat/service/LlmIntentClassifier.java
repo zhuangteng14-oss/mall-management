@@ -51,6 +51,7 @@ public class LlmIntentClassifier {
     private static final Set<ChatIntent> ALLOWED = EnumSet.of(
             ChatIntent.ORDER_QUERY,
             ChatIntent.REFUND_QUERY,
+            ChatIntent.COMMENT_QUERY,
             ChatIntent.OPEN_STORE,
             ChatIntent.ADD_TO_SECKILL,
             ChatIntent.NAVIGATE,
@@ -72,22 +73,34 @@ public class LlmIntentClassifier {
                例：「怎么上架商品」⇒ 字典里的「上架商品」；「我要去看店铺数据」⇒「经营数据」；
                    「我想改一下那个 299 元耳机的价格」⇒「查看商品」（改价与库存都在那一页）；
                    「我要管理我的钱」⇒「会员中心」（平台没有独立的钱包页）；
-                   「我要看评论」⇒ 商家选「查看商品」，客户选「我的订单」（平台没有独立评价页）；
                    「怎么处理退款」⇒ 商家选「售后工作台」，客户选「我的订单」；
                    ⚠️ 「怎么处理退款」问的是「去哪办」，**不是** ORDER_QUERY / REFUND_QUERY。
                ⚠️ 上面只说明「意思对应哪一行」，**路径必须从下方字典逐字抄**，别照例子拼。
                ⚠️ 「钱 / 余额 / 积分 / 资产 / 优惠券」相关一律选「会员中心」。
-               ⚠️ 「我要看评论」「怎么处理退款」「我要管理我的钱」都是 NAVIGATE（想看/想办某个页面），
-                  不要判成 ORDER_QUERY / REFUND_QUERY。
+               ⚠️ 「怎么处理退款」「我要管理我的钱」都是 NAVIGATE（想办/想看某个页面），
+                  不要判成 REFUND_QUERY。
                ⚠️ 「上架 / 发布商品」不是开店：「怎么上架商品」⇒ NAVIGATE「上架商品」；
                   只有「开店 / 入驻 / 加盟 / 营业执照」才是 OPEN_STORE。
             B. 数据查询与业务（用户问**自己那笔**的状态，这类**不要**给 target_path）
                ⇒ ORDER_QUERY（查我的订单状态/进度）、REFUND_QUERY（查我的售后进度/结果）、
+                  COMMENT_QUERY（查评论/评价内容、有没有人回复我）、
                   OPEN_STORE（开店/入驻）、ADD_TO_SECKILL（报名秒杀）、
                   FAQ（政策咨询）、GREETING（问候）、HELP（你能做什么）、UNKNOWN（闲聊/听不懂）。
                例：「我的订单到哪了」⇒ ORDER_QUERY；「我的退款进度」⇒ REFUND_QUERY；
+                   「我要看评论」「有没有人给我评论」⇒ COMMENT_QUERY（问的是评论内容与回复状态，
+                   平台没有独立的评价管理页，**不要**把它当导航）；
                    「怎么开店」⇒ OPEN_STORE；「我要报名秒杀」⇒ ADD_TO_SECKILL；
                    「我的新商品要上架秒杀页，还没上架呢」⇒ ADD_TO_SECKILL，且 need_publish = true。
+
+            你可以「调用」的业务数据工具（由后端在你判出意图后**真正执行**，你不需要自己查，
+            也不要编造结果）：
+            - 订单表 order：单号、商品、金额、付款/发货/收货状态、下单时间。
+              用户问「我的订单 / 那一单 / 物流到哪 / 最近买了什么」⇒ ORDER_QUERY。
+            - 售后表（订单上的退款字段）：订单号、退款状态、退款金额、原因、申请/处理时间。
+              用户问「退款进度 / 售后结果 / 钱退到哪一步」⇒ REFUND_QUERY。
+            - 评论表 comment：评论/提问正文、评分、商品名、是否已被商家回复、回复条数。
+              商家问「有没有人评论我的商品 / 有没有差评 / 有评论没回」⇒ COMMENT_QUERY；
+              客户问「我发过的评论 / 我的评价 / 商家回复我了吗」⇒ COMMENT_QUERY。
 
             规则：
             1. target_path 只能逐字取字典里的路径；字典里没有合适的页面就给 null。

@@ -553,6 +553,34 @@ onBeforeUnmount(() => {
 <!-- driver.js 的浮层渲染在 body 下，scoped 样式够不到 ⇒ 这一段是**全局**的，
      `popoverClass: 'chat-tour-popover'` 只在漫游时命中。 -->
 <style>
+/* ── 漫游小助手「飞行精灵」（useTour.js 创建，2026-10-22） ──
+   固定定位 + transform 过渡；飞行期间 driver 还没 drive()，所以页面上没有遮罩。
+   ⚠️ transition 的 .8s 必须与 useTour.js 的 FLIGHT_MS 一致（那边按这个时长等落地）。 */
+.tour-sprite {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 24px;
+  line-height: 1;
+  background: linear-gradient(135deg, var(--brand, #3b7966), var(--brand-ink, #275e4e));
+  box-shadow: 0 10px 24px rgba(39, 94, 78, .32), 0 0 0 4px rgba(59, 121, 102, .14);
+  pointer-events: none;
+  opacity: 0;
+  z-index: 10001;
+  will-change: transform;
+  transition: transform .8s ease-in-out, opacity .18s ease;
+}
+.tour-sprite.is-visible { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-sprite { transition: opacity .18s ease; }
+}
+
 .chat-tour-popover.driver-popover {
   background: var(--surface, #fff);
   color: var(--ink, #1d2b26);

@@ -3,12 +3,14 @@ package com.minke.mallmanagement.chat.service;
 import com.minke.mallmanagement.chat.model.ChatIntent;
 import com.minke.mallmanagement.chat.model.ResolvedIdentity;
 import com.minke.mallmanagement.chat.model.UserIdentity;
+import com.minke.mallmanagement.comment.dao.CommentDao;
 import com.minke.mallmanagement.order.RefundStatusText;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
 import com.minke.mallmanagement.order.refund.service.OrderRefundService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -74,25 +76,65 @@ public class ChatAgentService {
     private static final Pattern NOT_PUBLISHED = Pattern.compile(
             "(?:还没|没|未|尚未|还没有)(?:上架|发布)");
 
+    /**
+     * 「评论 / 评价」类问句（2026-10-22 业务工具挂载）。
+     *
+     * <p>平台没有独立的评价管理页，而小模型仍可能把「我要看评论」判成 NAVIGATE（按旧 Prompt
+     * 落到商品管理）或 ORDER_QUERY —— 这里做一次确定性纠偏：只要问的是**评论内容本身**，
+     * 就走真实 DAO 查询，而不是把用户带去一个看不到评论的页面。
+     *
+     * <p>排除「怎么 / 如何 写评论」：那是操作指引，不是查数据。
+     */
+    private static final Pattern COMMENT_MARKERS = Pattern.compile("评论|评价|留言");
+    private static final Pattern COMMENT_HOWTO = Pattern.compile(
+            "(?:怎么|如何|怎样|在哪)(?:去)?(?:写|发|发布|添加|给)?(?:评论|评价|留言)");
+
+    /**
+     * 售后类问句（2026-10-22）：问「退款 / 退货 / 售后」时，落点只有商家售后工作台或客户我的订单。
+     *
+     * <p>模型偶尔把「怎么处理退款」的 target_path 选成会员中心（客户侧 2026-10-22 实测 2/3 次，
+     * 上一句刚问过「我的钱」时更容易串）。字典对这类说法有唯一命中，就以字典为准 ——
+     * 与上面 ORDER_QUERY / REFUND_QUERY 的纠偏同一条口径。
+     */
+    private static final Pattern AFTER_SALES = Pattern.compile("退款|退货|售后");
+
     private final OrderDao orderDao;
     private final OrderRefundService refundService;
     private final OrderStateMachine orderStateMachine;
     private final IdentityResolver identityResolver;
     private final SessionMemoryService memoryService;
     private final LlmIntentClassifier llmClassifier;
+    private final CommentDao commentDao;
+    private final LlmReplyComposer replyComposer;
 
+    /** 兼容入口（阶段一之前的单测 / 没装评论工具时）：两个新依赖都置空。 */
     public ChatAgentService(OrderDao orderDao,
                             OrderRefundService refundService,
                             OrderStateMachine orderStateMachine,
                             IdentityResolver identityResolver,
                             SessionMemoryService memoryService,
                             LlmIntentClassifier llmClassifier) {
+        this(orderDao, refundService, orderStateMachine, identityResolver, memoryService,
+                llmClassifier, null, null);
+    }
+
+    @Autowired
+    public ChatAgentService(OrderDao orderDao,
+                            OrderRefundService refundService,
+                            OrderStateMachine orderStateMachine,
+                            IdentityResolver identityResolver,
+                            SessionMemoryService memoryService,
+                            LlmIntentClassifier llmClassifier,
+                            CommentDao commentDao,
+                            LlmReplyComposer replyComposer) {
         this.orderDao = orderDao;
         this.refundService = refundService;
         this.orderStateMachine = orderStateMachine;
         this.identityResolver = identityResolver;
         this.memoryService = memoryService;
         this.llmClassifier = llmClassifier;
+        this.commentDao = commentDao;
+        this.replyComposer = replyComposer;
     }
 
     /**
@@ -130,8 +172,9 @@ public class ChatAgentService {
         String orderId = decision.orderId();
 
         Map<String, Object> resp = switch (intent) {
-            case ORDER_QUERY -> answerOrders(userId, role, orderId);
-            case REFUND_QUERY -> answerRefund(userId, role);
+            case ORDER_QUERY -> answerOrders(message, userId, role, orderId);
+            case REFUND_QUERY -> answerRefund(message, userId, role);
+            case COMMENT_QUERY -> answerComments(message, userId, role);
             case OPEN_STORE -> answerOpenStore(userId, role);
             case ADD_TO_SECKILL -> answerAddToSeckill(userId, role, decision.needPublish());
             case NAVIGATE -> answerNavigate(decision.targetPath(), userId, role, decision.needPublish());
@@ -172,6 +215,13 @@ public class ChatAgentService {
                 if (intent == ChatIntent.UNKNOWN) {
                     return byRules(message, normalized, faq, userId, role);
                 }
+                // 「我要看评论」：旧 Prompt 教模型导航到商品管理 / 我的订单，但那些页面都看不到评论。
+                // 问的是评论内容 ⇒ 走真实查询（工具挂载）。这条判据先于下面的导航纠偏。
+                if (looksLikeCommentQuery(normalized)
+                        && (intent == ChatIntent.ORDER_QUERY || intent == ChatIntent.REFUND_QUERY
+                            || intent == ChatIntent.NAVIGATE || intent == ChatIntent.UNKNOWN)) {
+                    return new Decision(ChatIntent.COMMENT_QUERY, null, false, null);
+                }
                 // 小模型偶尔把「我要看评论」这类「看某个页面」判成 ORDER_QUERY。
                 // 页面名以 RouteCatalog 为准：字典里有唯一且够长的说法、而用户又不是在问
                 // 「我那一笔到哪了」，就按导航走。判定见 asksAboutStatus。
@@ -188,6 +238,15 @@ public class ChatAgentService {
                 if (intent == ChatIntent.OPEN_STORE) {
                     String guessed = RouteCatalog.guess(message, role);
                     if (guessed != null && !guessed.endsWith("/user/apply")) {
+                        return new Decision(ChatIntent.NAVIGATE, null, false, guessed);
+                    }
+                }
+                // 售后类句子：模型判对了「要导航」但落点选错（实测「怎么处理退款」落到会员中心）。
+                // 只在字典有唯一命中、且用户没亲口说出模型选的那个页面名时纠正。
+                if (intent == ChatIntent.NAVIGATE && AFTER_SALES.matcher(normalized).find()) {
+                    String guessed = RouteCatalog.guess(message, role);
+                    if (guessed != null && !guessed.equals(result.targetPath())
+                            && !namesPageItself(normalized, result.targetPath())) {
                         return new Decision(ChatIntent.NAVIGATE, null, false, guessed);
                     }
                 }
@@ -260,6 +319,12 @@ public class ChatAgentService {
         return NOT_PUBLISHED.matcher(normalized).find();
     }
 
+    /** 问的是评论内容本身（不是「怎么写评论」的操作指引）。 */
+    private static boolean looksLikeCommentQuery(String normalized) {
+        return COMMENT_MARKERS.matcher(normalized).find()
+                && !COMMENT_HOWTO.matcher(normalized).find();
+    }
+
     /**
      * 用户是不是**直接说了那个页面的名字**。
      *
@@ -293,7 +358,8 @@ public class ChatAgentService {
 
     // ==================== 订单 ====================
 
-    private Map<String, Object> answerOrders(String userId, Integer role, String wantedOrderId) {
+    private Map<String, Object> answerOrders(String question, String userId, Integer role,
+                                             String wantedOrderId) {
         if (isBlank(userId)) {
             return notLoggedIn(ChatIntent.ORDER_QUERY);
         }
@@ -325,8 +391,10 @@ public class ChatAgentService {
             } else {
                 text = merchant ? "你店铺还没有订单记录。" : "你还没有下单记录，可以去首页逛逛～";
             }
-            return reply(ChatIntent.ORDER_QUERY, text, dataOrders(total, List.of()), null,
-                    orderSuggestions());
+            return reply(ChatIntent.ORDER_QUERY,
+                    composeOrFallback(question, ChatIntent.ORDER_QUERY,
+                            orderFacts(merchant, total, List.of(), idMiss ? wantedOrderId : null), text),
+                    dataOrders(total, List.of()), null, orderSuggestions());
         }
 
         StringBuilder text = new StringBuilder();
@@ -359,8 +427,11 @@ public class ChatAgentService {
         // 按单号命中时这份回复只讲那一笔 ⇒ `total` 写结果集大小，避免前端多出
         // 「共 N 笔，这里显示最近 1 笔」这种答非所问的脚注。
         long shownTotal = (!isBlank(wantedOrderId) && !idMiss) ? summaries.size() : total;
-        return reply(ChatIntent.ORDER_QUERY, text.toString(), dataOrders(shownTotal, summaries), null,
-                orderSuggestions());
+        return reply(ChatIntent.ORDER_QUERY,
+                composeOrFallback(question, ChatIntent.ORDER_QUERY,
+                        orderFacts(merchant, total, summaries, idMiss ? wantedOrderId : null),
+                        text.toString()),
+                dataOrders(shownTotal, summaries), null, orderSuggestions());
     }
 
     /** 「商品名（单号 X），实付 ¥Y，下单时间 Z」—— 单笔订单的口语化摘要。 */
@@ -433,7 +504,7 @@ public class ChatAgentService {
 
     // ==================== 售后 ====================
 
-    private Map<String, Object> answerRefund(String userId, Integer role) {
+    private Map<String, Object> answerRefund(String question, String userId, Integer role) {
         if (isBlank(userId)) {
             return notLoggedIn(ChatIntent.REFUND_QUERY);
         }
@@ -447,7 +518,10 @@ public class ChatAgentService {
             String text = merchant
                     ? "你店铺目前没有售后记录。"
                     : "你最近没有售后记录。已收货的订单可在「历史订单」页发起售后；也可以问「查我的订单」。";
-            return reply(ChatIntent.REFUND_QUERY, text, null, null, refundSuggestions());
+            return reply(ChatIntent.REFUND_QUERY,
+                    composeOrFallback(question, ChatIntent.REFUND_QUERY,
+                            "身份：" + (merchant ? "商家" : "客户") + "\n售后记录数：0\n", text),
+                    null, null, refundSuggestions());
         }
 
         Map<String, Object> row = rows.get(0);
@@ -501,7 +575,19 @@ public class ChatAgentService {
         data.put("handler", handler);
         data.put("retryCount", retry);
 
-        return reply(ChatIntent.REFUND_QUERY, text.toString(), data, null, refundSuggestions());
+        String facts = "身份：" + (merchant ? "商家" : "客户") + "\n"
+                + "订单号：" + orderId + "\n"
+                + "退款状态：" + statusLabel + "\n"
+                + "退款金额：¥" + money(amount) + "\n"
+                + "申请时间：" + (isBlank(applyAt) ? "—" : applyAt) + "\n"
+                + (merchant
+                    ? "买家原因：" + (isBlank(reason) ? "—" : reason) + "\n"
+                    : (isBlank(reason) ? "" : "原因：" + reason + "\n"))
+                + "处理人：" + (isBlank(handler) ? "—" : handler) + "\n"
+                + "处理时间：" + (isBlank(handledAt) ? "—" : handledAt) + "\n";
+        return reply(ChatIntent.REFUND_QUERY,
+                composeOrFallback(question, ChatIntent.REFUND_QUERY, facts, text.toString()),
+                data, null, refundSuggestions());
     }
 
     private List<Object> refundSuggestions() {
@@ -509,6 +595,208 @@ public class ChatAgentService {
         list.add("查我的订单");
         list.add("怎么开店");
         return list;
+    }
+
+    // ==================== 评论 / 评价（业务工具挂载） ====================
+
+    /**
+     * 「我要看评论」—— 真的去查 {@code comment} 表，而不是把用户带去一个看不到评论的页面。
+     *
+     * <p>商家：查自己商品下的评论（{@code goods.MerchantId} 圈定），带「收到几条 / 几条没回复」；
+     * 客户：查自己发过的评论（{@code comment.AuthorId = 登录名}），带「商家回复了没有」。
+     *
+     * <p>两个分支都只读、只取最近 {@value #RECENT_LIMIT} 条；正文已在 SQL 里截到 60 字。
+     */
+    private Map<String, Object> answerComments(String question, String userId, Integer role) {
+        if (isBlank(userId)) {
+            return notLoggedIn(ChatIntent.COMMENT_QUERY);
+        }
+        if (commentDao == null) {
+            return reply(ChatIntent.COMMENT_QUERY,
+                    "评论查询暂时不可用，请稍后再试。", null, null, defaultSuggestions());
+        }
+        boolean merchant = isMerchant(role);
+        long total;
+        long unanswered = 0;
+        List<Map<String, Object>> rows;
+        if (merchant) {
+            total = commentDao.countByMerchant(userId);
+            unanswered = commentDao.countUnansweredByMerchant(userId);
+            rows = commentDao.selectRecentByMerchant(userId, RECENT_LIMIT);
+        } else {
+            // comment.AuthorId 是**登录名**，会话里给的是**业务号** ⇒ 这里必须换算（类注释「三个账号」）。
+            String username = commentDao.selectUsernameByUserId(userId);
+            total = isBlank(username) ? 0 : commentDao.countByAuthor(username);
+            rows = isBlank(username) ? List.of() : commentDao.selectRecentByAuthor(username, RECENT_LIMIT);
+        }
+
+        List<Map<String, Object>> comments = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            comments.add(commentSummary(row));
+        }
+
+        String fallback = commentTemplateText(merchant, total, unanswered, comments);
+        String facts = commentFacts(merchant, total, unanswered, comments);
+        return reply(ChatIntent.COMMENT_QUERY,
+                composeOrFallback(question, ChatIntent.COMMENT_QUERY, facts, fallback),
+                dataComments(merchant, total, unanswered, comments), null, commentSuggestions());
+    }
+
+    private Map<String, Object> commentSummary(Map<String, Object> row) {
+        String kind = str(row.get("Kind"));
+        int merchantReplies = intOf(row.get("MerchantReplies"), 0);
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("id", row.get("Id"));
+        item.put("kind", kind);
+        item.put("kindLabel", kindLabel(kind));
+        item.put("goods", isBlank(str(row.get("GoodName"))) ? "（商品已下线）" : str(row.get("GoodName")));
+        item.put("rating", intOf(row.get("Rating"), 0));
+        item.put("content", str(row.get("Content")));
+        item.put("createdAt", str(row.get("CreatedAt")));
+        item.put("replyCount", intOf(row.get("ReplyCount"), 0));
+        item.put("merchantReplied", merchantReplies > 0);
+        return item;
+    }
+
+    private static String kindLabel(String kind) {
+        return switch (kind == null ? "" : kind) {
+            case "review" -> "评价";
+            case "question" -> "提问";
+            default -> "评论";
+        };
+    }
+
+    private Map<String, Object> dataComments(boolean merchant, long total, long unanswered,
+                                             List<Map<String, Object>> comments) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("scope", merchant ? "merchant" : "customer");
+        data.put("total", total);
+        if (merchant) {
+            data.put("unanswered", unanswered);
+        }
+        data.put("comments", comments);
+        return data;
+    }
+
+    /** 确定性模板：模型超时 / 未配置时的兜底，内容与「事实」逐项对齐。 */
+    private String commentTemplateText(boolean merchant, long total, long unanswered,
+                                       List<Map<String, Object>> comments) {
+        StringBuilder text = new StringBuilder();
+        if (total == 0) {
+            text.append(merchant
+                    ? "您店铺的商品目前还没有收到评论或提问。买家确认收货后可以在商品详情里评价。"
+                    : "您还没有发表过评论。确认收货后，可以在商品详情或历史订单里评价。");
+            return text.toString();
+        }
+        if (merchant) {
+            text.append("您店铺的商品共收到 ").append(total).append(" 条评论/提问");
+            text.append(unanswered > 0
+                    ? "，其中 " + unanswered + " 条还没有商家回复"
+                    : "，目前都回复过了");
+        } else {
+            text.append("您一共发表过 ").append(total).append(" 条评论/评价");
+        }
+        text.append("。");
+        if (!comments.isEmpty()) {
+            Map<String, Object> first = comments.get(0);
+            text.append("最近一条是").append(first.get("kindLabel"))
+                    .append("：商品「").append(first.get("goods")).append("」");
+            if ("评价".equals(first.get("kindLabel"))) {
+                text.append("，").append(first.get("rating")).append(" 星");
+            }
+            text.append("「").append(excerpt(str(first.get("content")), 30)).append("」，")
+                    .append(Boolean.TRUE.equals(first.get("merchantReplied"))
+                            ? (merchant ? "您已经回复过" : "商家已经回复了")
+                            : (merchant ? "还没有回复" : "商家还没有回复"))
+                    .append("。");
+        }
+        text.append("平台没有独立的评价管理页，评论随商品详情展示。");
+        return text.toString();
+    }
+
+    /** 给模型看的事实（每条一行，全部来自 DAO；模型不许编造）。 */
+    private String commentFacts(boolean merchant, long total, long unanswered,
+                                List<Map<String, Object>> comments) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("身份：").append(merchant ? "商家" : "客户").append('\n');
+        sb.append(merchant ? "店铺商品收到的评论/提问总数：" : "我发表过的评论总数：")
+                .append(total).append('\n');
+        if (merchant) {
+            sb.append("其中还没有商家回复：").append(unanswered).append('\n');
+        }
+        sb.append("平台没有独立的评价管理页，评论随商品详情展示。\n");
+        sb.append("最近 ").append(comments.size()).append(" 条：\n");
+        for (Map<String, Object> c : comments) {
+            sb.append("- [").append(c.get("kindLabel"));
+            if ("评价".equals(c.get("kindLabel"))) {
+                sb.append(" ").append(c.get("rating")).append(" 星");
+            }
+            sb.append("] 商品「").append(c.get("goods")).append("」：“")
+                    .append(str(c.get("content"))).append("”，共 ")
+                    .append(c.get("replyCount")).append(" 条回复，")
+                    .append(Boolean.TRUE.equals(c.get("merchantReplied")) ? "商家已回复" : "商家未回复")
+                    .append('\n');
+        }
+        return sb.toString();
+    }
+
+    private List<Object> commentSuggestions() {
+        List<Object> list = new ArrayList<>();
+        list.add("查我的订单");
+        list.add("查售后进度");
+        list.add("怎么开店");
+        return list;
+    }
+
+    // ==================== 工具结果 → 口语播报 ====================
+
+    /**
+     * 把 DAO 查出来的真实数据交给模型生成话术；模型不可用就回确定性模板。
+     *
+     * <p>「工具调用」在本仓的落法：模型负责**选**工具（意图），后端负责**执行**（DAO），
+     * 再把结果回喂模型**写话术**。三步任何一步失败都不会让用户看到空白或 500。
+     */
+    private String composeOrFallback(String question, ChatIntent intent, String facts, String fallback) {
+        if (replyComposer == null || !replyComposer.isEnabled()) {
+            return fallback;
+        }
+        try {
+            String composed = replyComposer.compose(question, intent.name(), facts);
+            return isBlank(composed) ? fallback : composed;
+        } catch (RuntimeException e) {
+            log.warn("播报话术生成失败，回退模板：{}: {}",
+                    e.getClass().getSimpleName(), e.getMessage());
+            return fallback;
+        }
+    }
+
+    /** 订单工具的事实文本。 */
+    private String orderFacts(boolean merchant, long total, List<Map<String, Object>> summaries,
+                              String missingOrderId) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("身份：").append(merchant ? "商家" : "客户").append('\n');
+        sb.append("订单总数：").append(total).append('\n');
+        if (!isBlank(missingOrderId)) {
+            sb.append("用户提供的单号 ").append(missingOrderId).append(" 查无记录（不在其名下）。\n");
+        }
+        sb.append("最近 ").append(summaries.size()).append(" 笔：\n");
+        for (Map<String, Object> row : summaries) {
+            sb.append("- 单号 ").append(row.get("orderId"))
+                    .append("｜商品 ").append(row.get("product"))
+                    .append("｜¥").append(money(row.get("amount")))
+                    .append("｜状态 ").append(row.get("stateLabel"))
+                    .append("｜下单时间 ").append(row.get("createTime"))
+                    .append('\n');
+        }
+        return sb.toString();
+    }
+
+    /** 截断展示用：超过 {@code max} 字加省略号。 */
+    private static String excerpt(String text, int max) {
+        if (isBlank(text)) {
+            return "（无正文）";
+        }
+        return text.length() > max ? text.substring(0, max) + "…" : text;
     }
 
     // ==================== 开店 ====================
@@ -734,7 +1022,7 @@ public class ChatAgentService {
         List<Object> suggestions = new ArrayList<>();
         suggestions.add("怎么开店");
         return reply(intent,
-                "您当前还未登录。登录后才能查询你的订单和售后。你可以先问我「怎么开店」，或登录后再来。",
+                "您当前还未登录。登录后才能查询你的订单、售后和评论。你可以先问我「怎么开店」，或登录后再来。",
                 null, null, suggestions);
     }
 

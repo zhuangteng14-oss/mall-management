@@ -845,6 +845,109 @@ public class CommentDao {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
+    // ==================== 读：智能客服「看评论」业务工具（2026-10-22） ====================
+
+    /**
+     * 商家侧「我商品收到的评论」—— 智能客服 {@code COMMENT_QUERY} 的数据出口。
+     *
+     * <p>归属判据走 {@code comment.TargetType='goods' AND comment.TargetId = goods.Id}，
+     * 再用 {@code goods.MerchantId}（商家的<b>业务号</b>）圈定。两点口径同本类既有的
+     * {@code countPurchasedGoods} / {@code selectMerchantUsernameByGoodsId}：
+     * <ul>
+     *   <li>{@code TargetId} 是 {@code varchar}、{@code goods.Id} 是数字 ⇒ 必须
+     *       {@code CAST(g.Id AS CHAR)}。反过来让 MySQL 把 varchar 侧转成数字，会既丢索引又可能误命中。</li>
+     *   <li>{@code TargetType} 必须显式限定 {@code 'goods'} —— 评论还可以挂在订单等对象上，
+     *       不限定就会把别家的对象也 JOIN 进来。</li>
+     * </ul>
+     *
+     * <p>「商家回复了几条」用相关子查询现算，不读冗余计数列：{@code comment} 上没有
+     * 「本楼商家回复数」这一列，而 {@code IsMerchantFirst} 只标**首条**，不能当条数用。
+     *
+     * <p>正文在 SQL 里截到 60 字（同 {@link #selectTimedOutQuestions} 的理由：回复播报只需要摘要，
+     * 不把 {@code varchar(1000)} 整列搬回 Java）。
+     */
+    public List<Map<String, Object>> selectRecentByMerchant(String merchantId, int limit) {
+        String sql = "SELECT " + MERCHANT_COMMENT_COLUMNS + " "
+                + "FROM `comment` c "
+                + "JOIN `goods` g ON c.`TargetType` = 'goods' AND c.`TargetId` = CAST(g.`Id` AS CHAR) "
+                + "WHERE g.`MerchantId` = ? AND c.`ParentId` IS NULL AND c.`Status` <> 'deleted' "
+                + "ORDER BY c.`created_at` DESC LIMIT ?";
+        return jdbcClient.sql(sql).params(merchantId, limit).query().listOfRows();
+    }
+
+    /** 商家的商品下有多少条**顶层**评论 / 提问（口径与 {@link #selectRecentByMerchant} 共用谓词）。 */
+    public long countByMerchant(String merchantId) {
+        String sql = "SELECT COUNT(*) FROM `comment` c "
+                + "JOIN `goods` g ON c.`TargetType` = 'goods' AND c.`TargetId` = CAST(g.`Id` AS CHAR) "
+                + "WHERE g.`MerchantId` = ? AND c.`ParentId` IS NULL AND c.`Status` <> 'deleted'";
+        Long n = jdbcClient.sql(sql).param(merchantId).query(Long.class).single();
+        return n == null ? 0L : n;
+    }
+
+    /**
+     * 其中**还没有任何商家回复**的条数（客服话术里「其中 M 条还没回复」的那个 M）。
+     *
+     * <p>{@code AuthorRole = 2} 是商家（1 客户 / 3 管理员，见 {@code CommentService} 的写侧）。
+     * 买家之间的回复不算「商家已回复」。
+     */
+    public long countUnansweredByMerchant(String merchantId) {
+        String sql = "SELECT COUNT(*) FROM `comment` c "
+                + "JOIN `goods` g ON c.`TargetType` = 'goods' AND c.`TargetId` = CAST(g.`Id` AS CHAR) "
+                + "WHERE g.`MerchantId` = ? AND c.`ParentId` IS NULL AND c.`Status` <> 'deleted' "
+                + "AND NOT EXISTS (SELECT 1 FROM `comment` r WHERE r.`ParentId` = c.`Id` "
+                + "  AND r.`Status` <> 'deleted' AND r.`AuthorRole` = 2)";
+        Long n = jdbcClient.sql(sql).param(merchantId).query(Long.class).single();
+        return n == null ? 0L : n;
+    }
+
+    /**
+     * 客户侧「我发过的评论」—— 智能客服 {@code COMMENT_QUERY} 的客户分支。
+     *
+     * <p>⚠️ {@code AuthorId} 存的是**登录名**（{@code login.UserName}），不是业务号 ——
+     * 调用方必须先经 {@link #selectUsernameByUserId} 换算（类注释「三个账号」一节）。
+     */
+    public List<Map<String, Object>> selectRecentByAuthor(String authorId, int limit) {
+        String sql = "SELECT " + AUTHOR_COMMENT_COLUMNS + ", g.`GoodName` "
+                + "FROM `comment` c "
+                + "LEFT JOIN `goods` g ON c.`TargetType` = 'goods' "
+                + "  AND c.`TargetId` = CAST(g.`Id` AS CHAR) "
+                + "WHERE c.`AuthorId` = ? AND c.`ParentId` IS NULL AND c.`Status` <> 'deleted' "
+                + "ORDER BY c.`created_at` DESC LIMIT ?";
+        return jdbcClient.sql(sql).params(authorId, limit).query().listOfRows();
+    }
+
+    /** 客户发过的顶层评论总数（口径与 {@link #selectRecentByAuthor} 一致）。 */
+    public long countByAuthor(String authorId) {
+        Long n = jdbcClient.sql("SELECT COUNT(*) FROM `comment` "
+                        + "WHERE `AuthorId` = ? AND `ParentId` IS NULL AND `Status` <> 'deleted'")
+                .param(authorId).query(Long.class).single();
+        return n == null ? 0L : n;
+    }
+
+    /**
+     * 商家侧评论的投影（带 {@code c.} 限定 —— 本类唯一一处 {@code JOIN goods} 的读投影）。
+     * ⚠️ 不能复用 {@link #COMMENT_COLUMNS}：那张表不带别名，JOIN 后 {@code Id} / {@code created_at}
+     * 两边重名 ⇒ ambiguous（同 {@link #IMAGE_REVIEW_COLUMNS} 的理由）。
+     */
+    private static final String MERCHANT_COMMENT_COLUMNS =
+            "c.`Id`, c.`Kind`, c.`Rating`, LEFT(c.`Content`, 60) AS `Content`, "
+                    + "c.`TargetId`, g.`Id` AS `GoodsId`, g.`GoodName`, "
+                    + "DATE_FORMAT(c.`created_at`, '%Y-%m-%d %H:%i:%s') AS `CreatedAt`, "
+                    + "(SELECT COUNT(*) FROM `comment` r WHERE r.`ParentId` = c.`Id` "
+                    + "  AND r.`Status` <> 'deleted') AS `ReplyCount`, "
+                    + "(SELECT COUNT(*) FROM `comment` r WHERE r.`ParentId` = c.`Id` "
+                    + "  AND r.`Status` <> 'deleted' AND r.`AuthorRole` = 2) AS `MerchantReplies`";
+
+    /** 客户侧评论的投影（子查询里引用外层 {@code c}，故仍需别名；{@code g.GoodName} 由调用方追加）。 */
+    private static final String AUTHOR_COMMENT_COLUMNS =
+            "c.`Id`, c.`Kind`, c.`Rating`, LEFT(c.`Content`, 60) AS `Content`, "
+                    + "c.`TargetId`, c.`TargetType`, "
+                    + "DATE_FORMAT(c.`created_at`, '%Y-%m-%d %H:%i:%s') AS `CreatedAt`, "
+                    + "(SELECT COUNT(*) FROM `comment` r WHERE r.`ParentId` = c.`Id` "
+                    + "  AND r.`Status` <> 'deleted') AS `ReplyCount`, "
+                    + "(SELECT COUNT(*) FROM `comment` r WHERE r.`ParentId` = c.`Id` "
+                    + "  AND r.`Status` <> 'deleted' AND r.`AuthorRole` = 2) AS `MerchantReplies`";
+
     /**
      * 商品的商家**业务号**（就是 {@code goods.MerchantId} 本身，一跳都不用绕）。查无 ⇒ {@code null}。
      *

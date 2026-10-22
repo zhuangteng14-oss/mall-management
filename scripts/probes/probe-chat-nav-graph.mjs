@@ -4,7 +4,8 @@
 //   ① 模型返回的 action = { type:'navigate', targetPath }，**不返回步骤**；
 //   ② 点按钮后画面**留在当前页**高亮真实入口，用户点「下一步」才换页；
 //   ③ 每一步的锚点都是页面上真实可点的 DOM（顶栏 / 个人中心快捷入口）；
-//   ④ 冷问题落到真实页面，没有的页面（钱包 / 评价）如实说明。
+//   ④ 冷问题落到真实页面，没有的页面（钱包）如实说明；
+//   ⑤ 评论不再导航：走 COMMENT_QUERY 真查 comment 表（2026-10-22 工具挂载）。
 //
 // 真 dev server + 真后端 + 真模型，不 mock 任何请求。
 // ⚠️ 模型有 3s 超时降级：超时时后端用 RouteCatalog 的「用户说」说法兜底，落点不变。
@@ -236,15 +237,30 @@ try {
     shot: 'nav-03-price-list-arrived.png',
   })
 
-  // ── ④ 评论：没有独立评价页 ⇒ 落到商品管理并如实说明 ─────────────────────
-  await goHash('#/merchant')
-  await navCase('我要看评论', '/merchant/user/list', {
-    hops: 2,
-    anchors: ['#tour-entry-merchant', '[data-nav-to="/merchant/user/list"]', '.uc-main'],
-    arrived: '.uc-main',
-    shot: 'nav-04-review-truth.png',
-    replyHas: '评价管理页',
-  })
+  // ── ④ 评论：不再是导航，而是真查 comment 表（2026-10-22 工具挂载） ───────
+  // 换成有真实评论的商家账号：chenguang_parts 名下 0 条，用他验不出「播报真数据」。
+  {
+    const hm = await freshLogin('yunqi_digital', CREDS['yunqi_digital'])
+    ok('有评论的商家登录落 /merchant', hm === '#/merchant', { hash: hm })
+    await waitFor(`document.querySelector('.chat-root .ball')`, 12000)
+    const { done, body } = await sendChat('我要看评论')
+    const reply = await b.evalJS(`(() => { const bots = [...document.querySelectorAll('.bubble.bot')]; return bots[bots.length - 1]?.querySelector('.txt')?.textContent || '' })()`)
+    const data = body?.data || {}
+    ok('「我要看评论」⇒ COMMENT_QUERY（查真实评论，不返回 navigate）',
+      done && body?.intent === 'COMMENT_QUERY' && !body?.action,
+      { intent: body?.intent, action: body?.action ?? null })
+    ok('商家评论播报来自数据库：总数 / 最近一条 / 回复状态',
+      done && data.scope === 'merchant' && data.total > 0
+        && Array.isArray(data.comments) && data.comments.length > 0
+        && data.comments[0].content && typeof data.comments[0].merchantReplied === 'boolean'
+        && reply.includes(String(data.total)),
+      { total: data.total, unanswered: data.unanswered, first: data.comments?.[0], reply: reply.slice(0, 160) })
+    await b.shot(path.join(OUT, 'nav-04-merchant-comments.png'))
+    await closeTour()
+    // 回到原账号，后续用例的锚点与身份不变。
+    await freshLogin('chenguang_parts', CREDS['chenguang_parts'])
+    await waitFor(`document.querySelector('#tour-entry-merchant') && document.querySelector('.chat-root .ball')`, 12000)
+  }
 
   // ── ⑤ 管理钱：没有钱包页 ⇒ 会员中心 ─────────────────────────────────────
   await goHash('#/merchant')
@@ -294,14 +310,23 @@ try {
     shot: 'nav-08-customer-refund.png',
   })
 
+  // 客户「看评论」同样查真实数据：1111 账号名下有大量历史评论。
   await goHash('#/customer')
-  await navCase('我要看评论', '/customer/orders', {
-    hops: 2,
-    anchors: ['#tour-entry-merchant', '[data-nav-to="/customer/orders"]', '.ordermine-page'],
-    arrived: '.ordermine-page',
-    shot: 'nav-09-customer-review.png',
-    replyHas: '评价管理页',
-  })
+  {
+    const { done, body } = await sendChat('我要看评论')
+    const reply = await b.evalJS(`(() => { const bots = [...document.querySelectorAll('.bubble.bot')]; return bots[bots.length - 1]?.querySelector('.txt')?.textContent || '' })()`)
+    const data = body?.data || {}
+    ok('客户「我要看评论」⇒ COMMENT_QUERY，按登录名查自己的评论',
+      done && body?.intent === 'COMMENT_QUERY' && data.scope === 'customer' && data.total > 0
+        && Array.isArray(data.comments) && data.comments.length > 0 && !body?.action,
+      { intent: body?.intent, total: data.total, first: data.comments?.[0], reply: reply.slice(0, 160) })
+    ok('客户评论播报带真实条数与商家回复状态',
+      done && reply.includes(String(data.total))
+        && Array.isArray(data.comments) && typeof data.comments[0]?.merchantReplied === 'boolean',
+      { reply: reply.slice(0, 160) })
+    await b.shot(path.join(OUT, 'nav-09-customer-comments.png'))
+    await closeTour()
+  }
 
   ok('页面无未捕获异常', pageErrors.length === 0, { pageErrors })
 } catch (e) {

@@ -158,6 +158,21 @@ class LlmIntentClassifierTest {
     }
 
     @Test
+    @DisplayName("工具挂载：COMMENT_QUERY 在白名单里；Prompt 带业务数据工具字典与「评论表」说明")
+    void commentQueryIsAllowedAndPromptHasToolCatalog() throws IOException {
+        AtomicReference<String> body = new AtomicReference<>();
+        String url = serve(200, envelope("{\"intent\":\"COMMENT_QUERY\",\"slots\":{}}"), null, body);
+
+        LlmIntentClassifier.Result result = classifier(url, Duration.ofSeconds(3))
+                .classify("有没有人给我评论", 2, "/merchant");
+
+        assertThat(result.intent()).isEqualTo(ChatIntent.COMMENT_QUERY);
+        // 工具字典：告诉模型「评论表里有什么」，这样它才敢判 COMMENT_QUERY 而不是导航。
+        assertThat(body.get()).contains("评论表 comment").contains("是否已被商家回复")
+                .contains("COMMENT_QUERY");
+    }
+
+    @Test
     @DisplayName("NavGraph：target_path 不在字典里 / 当前角色没有 ⇒ LlmException，不硬塞给前端")
     void rejectsTargetPathOutsideCatalog() throws IOException {
         String url = serve(200, envelope(

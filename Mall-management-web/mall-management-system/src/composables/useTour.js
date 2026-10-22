@@ -15,9 +15,13 @@
 //
 // ⚠️ 「下一步」的两种走法都要照顾：
 //   · 用户点 popover 的「下一步」⇒ 我们写下一索引 + `destroy()` + `router.push()`；
-//   · 用户**直接点被高亮的入口** ⇒ 浏览器自己完成跳转，watcher 读到新路由后
-//     用 `step.at(path)` 把索引对齐到「当前页该出现的那一步」（见 `alignIndex`），
-//     否则会对着上一页的锚点空等 8 秒然后整条流断掉。
+//   · 用户**直接点被高亮的入口**（2026-10-22 自动推进）⇒ 给该元素挂一次性 click 监听，
+//     路由真的变了才销毁 driver、把索引推到下一步；新页的 watcher 调 `resumeTourFlow()`
+//     时发现「旧页的 driver 还活着」会先销毁它再开下一步（见 `staleDriver`）。
+//     点击元素不是链接（如文件选择框）时，1.2 秒内没换页就什么都不做，漫游继续。
+//
+// ⚠️ 具身飞行（2026-10-22）：每一步先把右下角的小助手「飞」到目标上方 0.8 秒，
+//     飞行期间**不 drive()** —— 所以不会出现「遮罩先盖住整页、小助手瞬移」的观感。
 import { nextTick } from 'vue'
 import { getRole, isLoggedIn } from '../api/auth'
 import { buildNavSteps, navNode, normalizeNavPath } from '../config/navGraph'
@@ -314,6 +318,7 @@ export function clearTourFlow() {
   try {
     sessionStorage.removeItem(FLOW_KEY)
   } catch (e) { /* 无存储可用 ⇒ 本来也没有流程 */ }
+  hideSprite()
 }
 
 /** 这一步是否属于当前页。 */
@@ -349,7 +354,160 @@ let handoff = false
 let activePath = ''
 let resumeToken = 0
 
+// ── 具身飞行精灵（模块三） ───────────────────────────────────────────────────
+
+const SPRITE_CLASS = 'tour-sprite'
+/** 飞行时长：与 ChatWidget 里 `.tour-sprite` 的 transition 必须一致。 */
+const FLIGHT_MS = 800
+/** 点了高亮元素但这段时间内路由没变 ⇒ 当作普通点击（文件选择框 / 页内展开），不推进。 */
+const CLICK_NAV_WAIT_MS = 1200
+
+let sprite = null
+let spriteX = 0
+let spriteY = 0
+let flightToken = 0
+let clickToken = 0
+let activeStepEl = null
+let activeStepClick = null
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+function spriteHome() {
+  return {
+    x: Math.max(16, (window.innerWidth || 0) - 96),
+    y: Math.max(16, (window.innerHeight || 0) - 96),
+  }
+}
+
+function prefersReducedMotion() {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+/** 创建（或复用）固定定位的小助手。样式在 ChatWidget.vue 的全局段（`.tour-sprite`）。 */
+function ensureSprite() {
+  if (typeof document === 'undefined') return null
+  if (sprite && sprite.isConnected) return sprite
+  sprite = document.createElement('div')
+  sprite.className = SPRITE_CLASS
+  sprite.setAttribute('aria-hidden', 'true')
+  sprite.textContent = '🤖'
+  const home = spriteHome()
+  spriteX = home.x
+  spriteY = home.y
+  sprite.style.transform = `translate3d(${spriteX}px, ${spriteY}px, 0)`
+  document.body.appendChild(sprite)
+  return sprite
+}
+
+function hideSprite() {
+  // 让正在进行中的飞行作废：它醒来时 token 已变，不会再打开高亮。
+  flightToken += 1
+  if (!sprite) return
+  sprite.classList.remove('is-visible')
+  sprite.dataset.flightMs = '0'
+  // 归位在透明状态下做：下一轮漫游仍从右下角起飞，而不是从上次的落点。
+  sprite.style.transition = 'none'
+  const home = spriteHome()
+  spriteX = home.x
+  spriteY = home.y
+  sprite.style.transform = `translate3d(${spriteX}px, ${spriteY}px, 0)`
+  void sprite.offsetWidth
+  sprite.style.transition = ''
+}
+
+/**
+ * 让精灵从当前位置滑到目标元素上方 60px（0.8s ease-in-out）。
+ *
+ * @returns {Promise<boolean>} false = 目标在飞行途中消失，或这次飞行已被更新的调用取代
+ */
+async function flyTo(el) {
+  const sp = ensureSprite()
+  if (!sp) return true
+  const token = ++flightToken
+  const fromX = spriteX
+  const fromY = spriteY
+
+  // 先把目标滚进视口再量 —— 表单后半段的锚点初始可能在屏幕外，
+  // 不滚的话精灵会飞到窗口外面去。
+  try {
+    el.scrollIntoView({ block: 'center', inline: 'nearest' })
+  } catch (e) { /* 平滑滚动不被支持时，量到的 rect 仍然可用 */ }
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+  if (!el.isConnected || token !== flightToken) return false
+
+  const rect = el.getBoundingClientRect()
+  const x = Math.max(8, Math.min(rect.left, (window.innerWidth || 0) - 56))
+  const y = Math.max(8, rect.top - 60)
+
+  sp.dataset.flightFrom = `${Math.round(fromX)},${Math.round(fromY)}`
+  sp.dataset.flightTo = `${Math.round(x)},${Math.round(y)}`
+  const duration = prefersReducedMotion() ? 0 : FLIGHT_MS
+  sp.dataset.flightMs = String(duration)
+  sp.classList.add('is-visible')
+  // 强制一帧：元素刚创建时没有「上一帧」可供过渡，直接改终点会瞬移。
+  void sp.offsetWidth
+  spriteX = x
+  spriteY = y
+  sp.style.transform = `translate3d(${x}px, ${y}px, 0)`
+
+  if (duration === 0) return true
+  await sleep(duration)
+  return token === flightToken && el.isConnected
+}
+
+// ── 自动推进（模块二）：只监听当前高亮元素 ──────────────────────────────────
+
+function detachStepClick() {
+  if (activeStepEl && activeStepClick) {
+    try {
+      activeStepEl.removeEventListener('click', activeStepClick)
+    } catch (e) { /* 元素已随路由移除 */ }
+  }
+  activeStepEl = null
+  activeStepClick = null
+}
+
+/**
+ * 给**当前高亮的 DOM** 挂一次性 click 监听（模块二）。
+ *
+ * <p>判据是「路由真的变了」，不是「点了一下」：
+ * · 变成新路由 ⇒ 立刻把进度推到下一步、销毁旧 driver（`handoff` 保证存档不丢），
+ *   新页挂载后由 `resumeTourFlow` 自动开下一步高亮；
+ * · 1.2 秒内没换页（如主图是 `<input type=file>`）⇒ 当作普通点击，漫游原样继续。
+ *
+ * <p>用户自己关掉漫游时 `destroyTourDriver` 会 `detachStepClick`，监听不会残留。
+ */
+function watchStepClick(flow, index, el, owner) {
+  detachStepClick()
+  const token = ++clickToken
+  const from = activePath
+  const onClick = () => {
+    const startedAt = Date.now()
+    const tick = () => {
+      if (token !== clickToken) return
+      if (currentTourPath() !== from) {
+        const next = index + 1
+        if (next < flow.steps.length) writeTourFlow(flow.id, next)
+        else clearTourFlow()
+        // ⚠️ 只销毁**这一步的** driver：新页的 watcher 可能已经开出了下一步的新实例，
+        //    按「当前全局 tourDriver」去销毁会把刚亮起来的那一步一起打掉。
+        if (owner && tourDriver === owner && owner.isActive()) destroyTourDriver()
+        return
+      }
+      if (Date.now() - startedAt > CLICK_NAV_WAIT_MS) return
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  }
+  el.addEventListener('click', onClick, { once: true })
+  activeStepEl = el
+  activeStepClick = onClick
+}
+
 function destroyTourDriver() {
+  detachStepClick()
   const d = tourDriver
   if (!d) return
   handoff = true
@@ -383,9 +541,15 @@ async function openFlowStep(flow, index) {
   // 交给下一次 `resumeTourFlow` 按新路径重新对齐，别用 dummy 元素开一个空洞的高亮。
   if (!isVisible(document.querySelector(step.element))) return null
 
+  // 先拆上一步（遮罩消失），再让精灵飞过去 —— **飞行这 0.8 秒页面上没有遮罩**，
+  // 飞到位后才 drive()。顺序反过来就是「遮罩先盖上、小助手瞬移」。
+  destroyTourDriver()
+  const el = document.querySelector(step.element)
+  const arrived = await flyTo(el)
+  if (!arrived || !isVisible(el)) return null
+
   const total = flow.steps.length
   const last = index === total - 1
-  destroyTourDriver()
   tourDriver = driver({
     showProgress: true,
     progressText: `第 ${index + 1} 步 / 共 ${total} 步`,
@@ -418,6 +582,8 @@ async function openFlowStep(flow, index) {
     },
   })
   tourDriver.drive()
+  // 模块二：只给**这一步高亮的那一个元素**挂一次性监听。
+  watchStepClick(flow, index, el, tourDriver)
   return tourDriver
 }
 
@@ -482,9 +648,14 @@ export async function resumeTourFlow(path) {
     return null
   }
   if (index !== state.index) writeTourFlow(flow.id, index)
+
+  // 自动推进（模块二）的关键一步：用户直接点了被高亮的入口，旧 driver 还指着
+  // **上一页**的 DOM。必须先销毁它，否则下面的「已有一条活着的引导」会把它原样
+  // 返回给新页 —— 高亮停在旧位置，整条流看起来像卡死了。
+  if (tourDriver && normalizePath(current) !== activePath) destroyTourDriver()
   activePath = current
 
-  // 已经有一条活着的引导（watcher 与 onMounted 同时触发）⇒ 不重复开。
+  // 同页同时触发（watcher 与 onMounted）⇒ 不重复开。
   if (tourDriver && tourDriver.isActive()) return tourDriver
 
   const token = ++resumeToken

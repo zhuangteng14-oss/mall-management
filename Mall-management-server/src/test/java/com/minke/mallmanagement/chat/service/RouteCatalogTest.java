@@ -36,16 +36,20 @@ class RouteCatalogTest {
     }
 
     @Test
-    @DisplayName("Prompt 清单逐字带真实路径与中文说明，且说明里如实写了「没有钱包页 / 没有评价页」")
+    @DisplayName("Prompt 清单逐字带真实路径与中文说明；钱包页的真话仍在，评论不再当页面导航")
     void promptCatalogCarriesRealPathsAndTruth() {
         String merchantPrompt = RouteCatalog.promptCatalog(2);
         String customerPrompt = RouteCatalog.promptCatalog(1);
 
         assertThat(merchantPrompt).contains("- /merchant/user/add", "- /merchant/stats", "- /merchant/after-sales")
                 .contains("没有独立的钱包页")
-                .contains("独立的评价管理页");
+                // 2026-10-22 工具挂载：「看评论」改由 COMMENT_QUERY 查真实数据，
+                // 字典里不再把评价/评论写成「选某个页面」的说法。
+                .doesNotContain("看评价")
+                .doesNotContain("看评论");
         assertThat(customerPrompt).contains("- /customer/user/member")
-                .doesNotContain("/merchant/stats");
+                .doesNotContain("/merchant/stats")
+                .doesNotContain("看评论");
     }
 
     @Test
@@ -79,7 +83,8 @@ class RouteCatalogTest {
     @Test
     @DisplayName("降级匹配：用字典里的「用户说」说法找页面；并列 / 太短就说不准")
     void guessUsesDictionaryPhrases() {
-        assertThat(RouteCatalog.guess("我要看评论", 2)).isEqualTo("/merchant/user/list");
+        // 「看评论」不再是页面线索：它由 COMMENT_QUERY 查真实数据（2026-10-22 工具挂载）。
+        assertThat(RouteCatalog.guess("我要看评论", 2)).isNull();
         assertThat(RouteCatalog.guess("我要管理我的钱", 2)).isEqualTo("/merchant/user/member");
         assertThat(RouteCatalog.guess("我要去看店铺数据", 2)).isEqualTo("/merchant/stats");
         assertThat(RouteCatalog.guess("怎么上架商品", 2)).isEqualTo("/merchant/user/add");
@@ -88,7 +93,7 @@ class RouteCatalogTest {
         assertThat(RouteCatalog.guess("怎么处理退款", 2)).isEqualTo("/merchant/after-sales");
         // 同一句话在客户壳落到订单页（客户没有售后工作台）
         assertThat(RouteCatalog.guess("怎么处理退款", 1)).isEqualTo("/customer/orders");
-        assertThat(RouteCatalog.guess("我要看评论", 1)).isEqualTo("/customer/orders");
+        assertThat(RouteCatalog.guess("我要看评论", 1)).isNull();
 
         assertThat(RouteCatalog.guess("今天天气不错", 2)).isNull();
         assertThat(RouteCatalog.guess("我要看", 2)).isNull();
@@ -101,8 +106,9 @@ class RouteCatalogTest {
         String member = RouteCatalog.userSummary(RouteCatalog.find("/merchant/user/member"));
         assertThat(member).contains("余额", "没有独立的钱包页").doesNotContain("用户说");
 
+        // 评论相关内容已从字典说明里移除（改由 COMMENT_QUERY 播报），这里只保留商品管理的说明。
         String list = RouteCatalog.userSummary(RouteCatalog.find("/merchant/user/list"));
-        assertThat(list).contains("评价管理页").doesNotContain("用户说");
+        assertThat(list).contains("商品管理").doesNotContain("用户说").doesNotContain("评价");
     }
 
     @Test

@@ -77,9 +77,8 @@ public final class RouteCatalog {
             new Route("/merchant/user/add", "上架商品",
                     "发布新商品：主图、名称、分类、价格、详情与提交审核。用户说「上架 / 发布商品 / 卖东西 / 新增商品」时选它。", MERCHANT),
             new Route("/merchant/user/list", "查看商品",
-                    "商品管理：在售 / 待审 / 驳回商品与 SKU，可编辑价格与库存；"
-                            + "平台暂无独立的评价管理页，买家评价随商品详情展示。"
-                            + "用户说「商品管理 / 改价 / 改价格 / 价格 / 改库存 / 编辑商品 / 看评价 / 看评论」时选它。", MERCHANT),
+                    "商品管理：在售 / 待审 / 驳回商品与 SKU，可编辑价格与库存。"
+                            + "用户说「商品管理 / 改价 / 改价格 / 价格 / 改库存 / 编辑商品」时选它。", MERCHANT),
             new Route("/merchant/user/history", "历史购买记录",
                     "已完成的历史订单。用户说「历史订单 / 以前买过什么」时选它。", MERCHANT),
             new Route("/merchant/user/friend", "好友",
@@ -108,8 +107,8 @@ public final class RouteCatalog {
             new Route("/customer/cart", "购物车",
                     "购物车与结算。用户说「购物车 / 结算 / 买东西」时选它。", CUSTOMER),
             new Route("/customer/orders", "我的订单",
-                    "我的订单列表（含售后进度）；评价随订单与商品详情展示，平台没有独立的评价管理页。"
-                            + "用户说「我的订单 / 我买的东西 / 处理退款 / 退货 / 看评论」时选它。", CUSTOMER),
+                    "我的订单列表（含售后进度）。"
+                            + "用户说「我的订单 / 我买的东西 / 处理退款 / 退货」时选它。", CUSTOMER),
             new Route("/customer/user", "个人中心",
                     "用户中心：个人资料、订单与资产的枢纽。用户说「个人中心 / 用户中心 / 我的主页」时选它。", CUSTOMER),
             new Route("/customer/user/info", "个人信息",

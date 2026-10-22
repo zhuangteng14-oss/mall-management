@@ -47,6 +47,18 @@ public final class ChatIntentRecognizer {
     private static final Pattern ORDER = Pattern.compile(
             "订单|物流|快递|发货|收货|到货|我的单|单号|买的东西|包裹");
 
+    /**
+     * 评论 / 评价（2026-10-22 业务工具挂载）。
+     *
+     * <p>排在订单之后：「我的订单评论」先按订单查更贴近用户意图；单独说「看评论 / 有没有人回复我」
+     * 才落到 {@link ChatIntent#COMMENT_QUERY}。
+     *
+     * <p>⚠️ 只认「内容」本身，不认「怎么去评价页」—— 平台没有独立评价页，这类问法由
+     * {@code ChatAgentService} 的字典纠偏处理（本类只管分流，不做页面映射）。
+     */
+    private static final Pattern COMMENT = Pattern.compile(
+            "评论|评价|有人回复|回复我|留言");
+
     private static final Pattern OPEN_STORE = Pattern.compile(
             "开店|入驻|开个店|开一家店|开店铺|成为商家|卖东西|卖货|上架|加盟|营业执照");
 
@@ -96,6 +108,8 @@ public final class ChatIntentRecognizer {
             intent = ChatIntent.REFUND_QUERY;
         } else if (ORDER.matcher(text).find()) {
             intent = ChatIntent.ORDER_QUERY;
+        } else if (COMMENT.matcher(text).find()) {
+            intent = ChatIntent.COMMENT_QUERY;
         } else if (SECKILL.matcher(text).find()) {
             intent = ChatIntent.ADD_TO_SECKILL;
         } else if (OPEN_STORE.matcher(text).find()) {

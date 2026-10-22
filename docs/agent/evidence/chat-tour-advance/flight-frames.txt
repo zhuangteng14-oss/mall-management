@@ -1,0 +1,6 @@
+t=2ms x=315 y=330 flightMs=800 popover=false
+t=161ms x=315 y=327 flightMs=800 popover=false
+t=301ms x=315 y=313 flightMs=800 popover=false
+t=456ms x=315 y=287 flightMs=800 popover=false
+t=613ms x=315 y=262 flightMs=800 popover=false
+t=753ms x=315 y=247 flightMs=800 popover=false
