@@ -330,7 +330,7 @@
         <router-link class="shortcut" :to="friendPath"><span class="s-no">03 / MESSAGES</span><strong>好友 / 消息</strong><small>打开好友与私信，继续沟通。</small><span class="s-go">打开消息 →</span></router-link>
         <router-link v-if="isMerchantShell" class="shortcut" :to="orderCenterPath"><span class="s-no">04 / SHIP</span><strong>商家订单处理</strong><small>进入订单中心处理发货与售后。</small><span class="s-go">去发货 →</span></router-link>
         <router-link v-else class="shortcut" :to="applyPath"><span class="s-no">04 / MERCHANT</span><strong>商家入驻申请</strong><small>提交表单，审核通过后解锁工作台。</small><span class="s-go">去申请 →</span></router-link>
-        <router-link v-if="isMerchantShell" class="shortcut" :to="addGoodsPath"><span class="s-no">05 / LISTING</span><strong>上架商品</strong><small>新建商品、保存草稿并提交审核。</small><span class="s-go">去上架 →</span></router-link>
+        <router-link id="tour-menu-add" v-if="isMerchantShell" class="shortcut" :to="addGoodsPath"><span class="s-no">05 / LISTING</span><strong>上架商品</strong><small>新建商品、保存草稿并提交审核。</small><span class="s-go">去上架 →</span></router-link>
         <router-link v-if="isMerchantShell" class="shortcut" :to="listGoodsPath"><span class="s-no">06 / CATALOG</span><strong>查看商品</strong><small>管理在售、待审与驳回商品及 SKU。</small><span class="s-go">查看商品 →</span></router-link>
         <router-link v-if="isMerchantShell" class="shortcut" :to="statsPath"><span class="s-no">07 / STATS</span><strong>经营数据</strong><small>查看销售、订单与库存的经营看板。</small><span class="s-go">查看数据 →</span></router-link>
       </div>

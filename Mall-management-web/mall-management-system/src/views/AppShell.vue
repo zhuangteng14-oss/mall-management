@@ -33,7 +33,7 @@
             </router-link>
           </span>
           <router-link class="top-cart" :to="cartTo">购物车</router-link>
-          <router-link class="top-account" :to="accountTo">用户中心 / {{ username }}</router-link>
+          <router-link id="tour-entry-merchant" class="top-account" :to="accountTo">用户中心 / {{ username }}</router-link>
         </template>
         <router-link v-else class="top-account" to="/login">登录 / 注册</router-link>
       </div>

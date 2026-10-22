@@ -76,11 +76,13 @@ import {
   clearPendingTour,
   isMerchantRole,
   ordersPath,
-  publishPath,
+  PUBLISH_FLOW_ID,
   readPendingTour,
   resumePathAfterLogin,
+  resumeTourFlow,
   savePendingTour,
-  seckillPath,
+  SECKILL_FLOW_ID,
+  setTourNavigator, startTourFlow,
   startOpenStoreTour,
 } from '../../composables/useTour'
 
@@ -122,9 +124,6 @@ function normalize(p) {
 }
 function isApplyPath(p) {
   return normalize(p).endsWith('/user/apply')
-}
-function isSeckillPath(p) {
-  return normalize(p) === normalize(seckillPath())
 }
 function isLoginPath(p) {
   const n = normalize(p)
@@ -242,9 +241,9 @@ function onSuggestion(s) {
       return
     }
     if (s.routeKey === 'publish') {
-      // 阶段一：need_publish=true 时先引导去「上架商品」，不替用户猜商品/价格。
+      // 多步路径引导：先高亮当前页的入口，用户点「下一步」才跳；不直接 push 目标页。
       close()
-      router.push(publishPath()).catch(() => {})
+      startTourFlow(PUBLISH_FLOW_ID, route.path)
       return
     }
     if (s.routeKey === 'applyStatus') {
@@ -281,12 +280,8 @@ async function onAction(action) {
  */
 function startSeckill() {
   close()
-  if (isSeckillPath(route.path)) {
-    clearPendingTour()
-    return
-  }
-  savePendingTour('add-to-seckill', 'seckill', 'ADD_TO_SECKILL')
-  router.push(seckillPath()).catch(() => {})
+  // 秒杀两步在本页内完成；不在报名页时 startTourFlow 会先导航，watcher 再续。
+  startTourFlow(SECKILL_FLOW_ID, route.path)
 }
 
 async function startTour() {
@@ -317,10 +312,12 @@ watch(
       const pending = readPendingTour()
       // 秒杀待办 + 登录后仍是客户：不硬闯商家壳（壳归属守卫会踢回首页），
       // 直接重问一句，让后端按登录后的真实身份重新走六态分支。
-      if (pending && pending.routeKey === 'seckill' && !isMerchantRole()) {
+      if (pending && (pending.routeKey === 'seckill' || pending.routeKey === 'publish') && !isMerchantRole()) {
         clearPendingTour()
-        openChat()
-        send('我要报名秒杀')
+        if (pending.routeKey === 'seckill') {
+          openChat()
+          send('我要报名秒杀')
+        }
         return
       }
       const target = resumePathAfterLogin(normalize(to))
@@ -328,18 +325,16 @@ watch(
         router.push(target).catch(() => {})
         return
       }
-      if (pending && pending.routeKey === 'seckill') clearPendingTour()
+      if (pending && (pending.routeKey === 'seckill' || pending.routeKey === 'publish')) clearPendingTour()
     }
 
     if (isApplyPath(to)) {
       const pending = readPendingTour()
       if (pending && pending.routeKey === 'apply') await startTour()
     }
-    if (isSeckillPath(to)) {
-      // 商家已到达秒杀页 ⇒ 待办使命结束，别让它影响下一次导航。
-      const pending = readPendingTour()
-      if (pending && pending.routeKey === 'seckill') clearPendingTour()
-    }
+    // 多步引导：上一步的「下一步」已经 push 完，这里等新页挂载后接着高亮。
+    // 用户若自己导航到流程之外，resume 内部会把索引判为 -1 并结束流程。
+    await resumeTourFlow(to)
   },
 )
 
@@ -349,10 +344,13 @@ function onKeydown(e) {
 
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
+  // 引导流的跨页跳转由本组件代理（useTour 不能直接 import router，否则成环）。
+  setTourNavigator((path) => router.push(path).catch(() => {}))
   // 直接刷新在申请页 / 从别处回到申请页：待办也可能已经在了。
+  // 发布 / 秒杀页的锚点续跑由各自页面 onMounted 兜底，这里只补流程存档。
   const pending = readPendingTour()
   if (isApplyPath(route.path) && pending && pending.routeKey === 'apply') startTour()
-  if (isSeckillPath(route.path) && pending && pending.routeKey === 'seckill') clearPendingTour()
+  resumeTourFlow(route.path)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)

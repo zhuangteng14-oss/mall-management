@@ -84,9 +84,9 @@
 
         <div class="grid2">
           <div class="f">
-            <label for="g-name">商品名称</label>
+            <label for="tour-publish-title">商品名称</label>
             <input
-              id="g-name"
+              id="tour-publish-title"
               v-model="GoodName"
               class="inp"
               :class="{ err: showTip && !GoodName }"
@@ -220,7 +220,7 @@
           <!-- 主图 = **既有真功能**（`chooseImage` → `previewImg`，原实现逐字未动）。
                ⚠️ 稿 `:411` 的 `.picbox.main` 里是一行文字；本页**保留既有真预览**
                `<img v-if="previewImg">`（原实现就有），无图时才显那行文字。 -->
-          <button
+          <button id="tour-publish-image"
             type="button"
             class="picbox main"
             :class="{ err: showTip && !selectedFile }"
@@ -424,7 +424,7 @@
           @click="submitGoods(true)"
         >保存草稿</button>
 
-        <button type="button" class="btn-main" :disabled="saving" @click="submitGoods(false)"><IconGlyph name="ok" />提交审核</button>
+        <button id="tour-publish-submit" type="button" class="btn-main" :disabled="saving" @click="submitGoods(false)"><IconGlyph name="ok" />提交审核</button>
         <div class="hint">提交成功后会清空表单，可继续上架下一件。</div>
       </div>
     </form>
@@ -516,7 +516,7 @@ import { ref, computed, onMounted } from 'vue'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
 import { templateList } from '../api/template'   // 块 5〈折扣〉：类目上下限（公共读 /template/list）
-import { getMerchantId } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `GoodsAdd.vue:135/166/217` 钉住本文件）
+import { getMerchantId } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { resumeTourFlow } from '../composables/useTour'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `GoodsAdd.vue:135/166/217` 钉住本文件）
 import TemplatePicker from '../components/TemplatePicker.vue'
 
 const fileInput = ref(null)
@@ -577,7 +577,7 @@ const showTip = ref(false)
 
 onMounted(() => {
   loadGoodsType()
-  loadDiscountLimits()
+  loadDiscountLimits(); resumeTourFlow()
 })
 
 /**

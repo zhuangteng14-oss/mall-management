@@ -1,0 +1,17 @@
+PASS  商家登录落 /merchant  ""
+PASS  复杂语义拿到两枚胶囊  {"chips":["查我的订单","怎么开店","去发布商品→","去秒杀报名→"],"reply":"系统显示您当前是品牌商家。品牌：Chenguang-Brand-Store，长期有效。商品还没上架。先在「上架商品」发布商品，再回秒杀报名页选它；两个入口都在下面。"}
+PASS  Step1：当前页高亮「用户中心」入口（不瞬移）  {"hit":true,"progress":"第 1 步 / 共 5 步","active":true,"hash":"#/merchant"}
+PASS  Step2：下一步跳到个人中心并高亮「上架商品」  {"hit":true,"progress":"第 2 步 / 共 5 步","active":true,"hash":"#/merchant/user"}
+PASS  Step3：下一步跳到发布页并高亮商品名称  {"hit":true,"progress":"第 3 步 / 共 5 步","active":true,"hash":"#/merchant/user/add"}
+PASS  Step4：同页切到商品主图  {"hit":true,"progress":"第 4 步 / 共 5 步","active":true}
+PASS  Step5：同页切到提交审核  {"hit":true,"progress":"第 5 步 / 共 5 步","active":true}
+PASS  完成后浮层消失且流程存档清空  {"closed":true,"flow":null,"dom":{"count":0,"display":[],"overlay":0,"body":"","active":[]}}
+PASS  直接进发布页不触发高亮（无流程存档）  ""
+PASS  已在发布页：自动跳到第 3 步（不重复强调入口）  {"hit":true,"progress":"第 3 步 / 共 5 步","active":true,"clickedAgain":true,"flow":"{\"flowId\":\"publish\",\"index\":2,\"at\":1792656473839}","pop":1}
+PASS  「上一步」跨页回到个人中心并高亮上架入口  {"hit":true,"progress":"第 2 步 / 共 5 步","active":true,"hash":"#/merchant/user"}
+PASS  秒杀：落到报名页并高亮商品下拉  {"hit":true,"progress":"第 1 步 / 共 2 步","active":true,"hash":"#/merchant/seckill"}
+PASS  秒杀：同页切到提交报名  {"hit":true,"progress":"第 2 步 / 共 2 步","active":true}
+PASS  秒杀：完成后浮层消失  ""
+PASS  页面无未捕获异常  {"pageErrors":[]}
+
+flow: 15/15 PASS
