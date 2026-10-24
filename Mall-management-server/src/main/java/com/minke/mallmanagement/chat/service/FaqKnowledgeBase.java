@@ -30,7 +30,8 @@ public final class FaqKnowledgeBase {
 
     private static final List<Entry> ENTRIES = List.of(
             new Entry(List.of("拆封", "能退", "七天无理由", "7天无理由"),
-                    "支持7天无理由，但需保证不影响二次销售哦。", true),
+                    "已拆封的商品，若不影响二次销售（吊牌、包装完整）可在 7 天内无理由退货；"
+                            + "如果是质量问题（比如东西坏了），拆封也可以退换，运费由商家承担。", true),
             new Entry(List.of("运费", "包邮", "邮费"),
                     "本店满99包邮，偏远地区除外。", true),
             new Entry(List.of("人工客服", "真人客服", "转人工"),

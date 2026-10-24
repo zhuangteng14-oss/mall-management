@@ -1,0 +1,352 @@
+[
+  {
+    "id": "E01",
+    "role": 1,
+    "question": "拆封了能退货吗",
+    "expected_intent": "FAQ",
+    "expected_behavior": "answer",
+    "expected_answer_or_action": "支持7天无理由，但需保证不影响二次销售哦。",
+    "contexts": "政策：拆封退货 / 七天无理由。标准答案：支持7天无理由，但需保证不影响二次销售哦。",
+    "category": "policy_faq"
+  },
+  {
+    "id": "E02",
+    "role": 1,
+    "question": "七天无理由怎么算",
+    "expected_intent": "FAQ",
+    "expected_behavior": "answer",
+    "expected_answer_or_action": "支持7天无理由，但需保证不影响二次销售哦。",
+    "contexts": "政策：拆封退货 / 七天无理由。标准答案：支持7天无理由，但需保证不影响二次销售哦。",
+    "category": "policy_faq"
+  },
+  {
+    "id": "E03",
+    "role": 1,
+    "question": "运费怎么算",
+    "expected_intent": "FAQ",
+    "expected_behavior": "answer",
+    "expected_answer_or_action": "本店满99包邮，偏远地区除外。",
+    "contexts": "政策：运费 / 包邮。标准答案：本店满99包邮，偏远地区除外。",
+    "category": "policy_faq"
+  },
+  {
+    "id": "E04",
+    "role": 1,
+    "question": "你们包邮吗",
+    "expected_intent": "FAQ",
+    "expected_behavior": "answer",
+    "expected_answer_or_action": "本店满99包邮，偏远地区除外。",
+    "contexts": "政策：运费 / 包邮。标准答案：本店满99包邮，偏远地区除外。",
+    "category": "policy_faq"
+  },
+  {
+    "id": "E05",
+    "role": 1,
+    "question": "我要转人工客服",
+    "expected_intent": "FAQ",
+    "expected_behavior": "answer",
+    "expected_answer_or_action": "目前是自助客服；订单和售后问题可以直接问我，复杂问题请联系店铺客服。",
+    "contexts": "政策：人工客服。标准答案：目前是自助客服；订单和售后问题可以直接问我，复杂问题请联系店铺客服。",
+    "category": "policy_faq"
+  },
+  {
+    "id": "E06",
+    "role": 2,
+    "question": "怎么处理退款",
+    "expected_intent": "GUIDE_NAVIGATION",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/merchant/after-sales",
+    "contexts": "商家问「怎么处理退款 / 售后订单怎么处理」时，去商家售后工作台 /merchant/after-sales（默认开始引导）。",
+    "category": "navigation"
+  },
+  {
+    "id": "E07",
+    "role": 2,
+    "question": "售后订单怎么处理",
+    "expected_intent": "GUIDE_NAVIGATION",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/merchant/after-sales",
+    "contexts": "商家问「怎么处理退款 / 售后订单怎么处理」时，去商家售后工作台 /merchant/after-sales（默认开始引导）。",
+    "category": "navigation"
+  },
+  {
+    "id": "E08",
+    "role": 1,
+    "question": "怎么申请退款",
+    "expected_intent": "GUIDE_NAVIGATION",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/customer/orders",
+    "contexts": "客户问「怎么申请退款 / 退货流程」时，去我的订单 /customer/orders（默认开始引导）。",
+    "category": "navigation"
+  },
+  {
+    "id": "E09",
+    "role": 1,
+    "question": "退货流程是什么",
+    "expected_intent": "GUIDE_NAVIGATION",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/customer/orders",
+    "contexts": "客户问「怎么申请退款 / 退货流程」时，去我的订单 /customer/orders（默认开始引导）。",
+    "category": "navigation"
+  },
+  {
+    "id": "E10",
+    "role": 1,
+    "question": "我的退款进度",
+    "expected_intent": "REFUND_QUERY",
+    "expected_behavior": "data",
+    "expected_answer_or_action": "查询并播报本人最近一条售后记录",
+    "contexts": "退款进度类问题查当前登录身份的真实售后记录（订单号、退款状态、金额、原因、申请/处理时间）；不得编造状态或金额。",
+    "category": "data_query"
+  },
+  {
+    "id": "E11",
+    "role": 1,
+    "question": "退款到账了吗",
+    "expected_intent": "REFUND_QUERY",
+    "expected_behavior": "data",
+    "expected_answer_or_action": "查询并播报本人最近一条售后记录",
+    "contexts": "退款进度类问题查当前登录身份的真实售后记录（订单号、退款状态、金额、原因、申请/处理时间）；不得编造状态或金额。",
+    "category": "data_query"
+  },
+  {
+    "id": "E12",
+    "role": 2,
+    "question": "怎么看我上架的商品",
+    "expected_intent": "GOODS_MANAGE",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/merchant/user/list",
+    "contexts": "商家问「怎么看我上架的商品 / 我要管理商品」时，去商品管理页 /merchant/user/list。",
+    "category": "navigation"
+  },
+  {
+    "id": "E13",
+    "role": 2,
+    "question": "我要管理商品",
+    "expected_intent": "GOODS_MANAGE",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/merchant/user/list",
+    "contexts": "商家问「怎么看我上架的商品 / 我要管理商品」时，去商品管理页 /merchant/user/list。",
+    "category": "navigation"
+  },
+  {
+    "id": "E14",
+    "role": 2,
+    "question": "怎么前往商家工作台",
+    "expected_intent": "MERCHANT_DASHBOARD",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/merchant",
+    "contexts": "商家问「怎么前往商家工作台 / 商家后台怎么进」时，去商家首页 /merchant。",
+    "category": "navigation"
+  },
+  {
+    "id": "E15",
+    "role": 2,
+    "question": "商家后台怎么进",
+    "expected_intent": "MERCHANT_DASHBOARD",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/merchant",
+    "contexts": "商家问「怎么前往商家工作台 / 商家后台怎么进」时，去商家首页 /merchant。",
+    "category": "navigation"
+  },
+  {
+    "id": "E16",
+    "role": 2,
+    "question": "我花出去的钱去哪了",
+    "expected_intent": "ASSET_QUERY",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/merchant/user/member",
+    "contexts": "「我花出去的钱去哪了 / 余额和流水」去会员中心（余额、积分、资产明细）；平台没有独立钱包页。",
+    "category": "navigation"
+  },
+  {
+    "id": "E17",
+    "role": 2,
+    "question": "查询余额和流水",
+    "expected_intent": "ASSET_QUERY",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/merchant/user/member",
+    "contexts": "「我花出去的钱去哪了 / 余额和流水」去会员中心（余额、积分、资产明细）；平台没有独立钱包页。",
+    "category": "navigation"
+  },
+  {
+    "id": "E18",
+    "role": 1,
+    "question": "怎么申请品牌",
+    "expected_intent": "OPEN_STORE",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/customer/user/apply",
+    "contexts": "开店 / 入驻 / 品牌加盟去商家入驻申请页（客户壳 /customer/user/apply，商家壳 /merchant/user/apply）；先报系统解析身份，再按六态给下一步。",
+    "category": "navigation"
+  },
+  {
+    "id": "E19",
+    "role": 1,
+    "question": "开店入驻流程",
+    "expected_intent": "OPEN_STORE",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/customer/user/apply",
+    "contexts": "开店 / 入驻 / 品牌加盟去商家入驻申请页（客户壳 /customer/user/apply，商家壳 /merchant/user/apply）；先报系统解析身份，再按六态给下一步。",
+    "category": "navigation"
+  },
+  {
+    "id": "E20",
+    "role": 2,
+    "question": "怎么上架商品",
+    "expected_intent": "GUIDE_NAVIGATION",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/merchant/user/add",
+    "contexts": "「怎么上架商品 / 发布新商品」去上架商品页 /merchant/user/add。",
+    "category": "navigation"
+  },
+  {
+    "id": "E21",
+    "role": 2,
+    "question": "我要报名秒杀",
+    "expected_intent": "ADD_TO_SECKILL",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/merchant/seckill",
+    "contexts": "「我要报名秒杀 / 参加平台活动」去秒杀报名页 /merchant/seckill；只做身份分流和导航，不猜商品/价格/库存。",
+    "category": "navigation"
+  },
+  {
+    "id": "E22",
+    "role": 2,
+    "question": "我的新商品要上架秒杀页，还没上架呢",
+    "expected_intent": "ADD_TO_SECKILL",
+    "expected_behavior": "answer",
+    "expected_answer_or_action": "两枚胶囊：去发布商品 + 去秒杀报名",
+    "contexts": "用户明说「还没上架」时，秒杀分流给两枚胶囊：去发布商品 + 去秒杀报名。",
+    "category": "navigation"
+  },
+  {
+    "id": "E23",
+    "role": 1,
+    "question": "我的订单进度",
+    "expected_intent": "ORDER_QUERY",
+    "expected_behavior": "data",
+    "expected_answer_or_action": "查询并播报本人最近 3 笔订单",
+    "contexts": "订单类问题查当前登录身份的真实订单（商品、单号、金额、付款/发货/收货状态、下单时间）；没给单号时答最近 3 笔。",
+    "category": "data_query"
+  },
+  {
+    "id": "E24",
+    "role": 1,
+    "question": "我的快递到哪了",
+    "expected_intent": "ORDER_QUERY",
+    "expected_behavior": "data",
+    "expected_answer_or_action": "查询并播报本人最近 3 笔订单",
+    "contexts": "订单类问题查当前登录身份的真实订单（商品、单号、金额、付款/发货/收货状态、下单时间）；没给单号时答最近 3 笔。",
+    "category": "data_query"
+  },
+  {
+    "id": "E25",
+    "role": 1,
+    "question": "我要看评论",
+    "expected_intent": "COMMENT_QUERY",
+    "expected_behavior": "data",
+    "expected_answer_or_action": "查询并播报本人最近的评论",
+    "contexts": "评论类问题查当前登录身份的真实评论（总数、最近几条正文、评分、是否已回复）；平台没有独立评价管理页。",
+    "category": "data_query"
+  },
+  {
+    "id": "E26",
+    "role": 1,
+    "question": "怎么去个人中心",
+    "expected_intent": "GUIDE_NAVIGATION",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/customer/user",
+    "contexts": "「怎么去个人中心」去个人中心（客户 /customer/user，商家 /merchant/user）。",
+    "category": "navigation"
+  },
+  {
+    "id": "E27",
+    "role": 1,
+    "question": "购物车在哪",
+    "expected_intent": "GUIDE_NAVIGATION",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/customer/cart",
+    "contexts": "「购物车在哪」去购物车（客户 /customer/cart，商家 /merchant/order/cart）。",
+    "category": "navigation"
+  },
+  {
+    "id": "E28",
+    "role": 1,
+    "question": "通知在哪看",
+    "expected_intent": "GUIDE_NAVIGATION",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/customer/msg",
+    "contexts": "「通知在哪看」去消息中心（客户 /customer/msg，商家 /merchant/msg）。",
+    "category": "navigation"
+  },
+  {
+    "id": "E29",
+    "role": 1,
+    "question": "今天天气不错",
+    "expected_intent": "CLARIFY",
+    "expected_behavior": "refusal",
+    "expected_answer_or_action": "澄清问句；不猜业务意图",
+    "contexts": "与电商订单/售后/导航无关或相似度低于 0.75 的输入，不硬猜意图，回澄清问句（可选查订单 / 开店）。",
+    "category": "refusal"
+  },
+  {
+    "id": "E30",
+    "role": 1,
+    "question": "帮我写一首诗",
+    "expected_intent": "UNKNOWN",
+    "expected_behavior": "refusal",
+    "expected_answer_or_action": "明确说听不懂 / 拒答；不执行创作",
+    "contexts": "系统只回答电商订单、售后、商品、入驻、秒杀与页面导航相关问题；无法回答的请求应明确拒绝或澄清。",
+    "category": "refusal"
+  },
+  {
+    "id": "E31",
+    "role": 1,
+    "question": "你能做什么",
+    "expected_intent": "HELP",
+    "expected_behavior": "answer",
+    "expected_answer_or_action": "说明可查订单、查售后、带开店",
+    "contexts": "能力介绍：查最新订单状态、查退款进度、带用户去开店（含两步高亮引导）。",
+    "category": "capability"
+  },
+  {
+    "id": "E32",
+    "role": 1,
+    "question": "你好",
+    "expected_intent": "GREETING",
+    "expected_behavior": "answer",
+    "expected_answer_or_action": "简短问候",
+    "contexts": "问候类输入回简短问候，并提示可查订单 / 售后。",
+    "category": "greeting"
+  },
+  {
+    "id": "E33",
+    "role": 2,
+    "question": "怎么看店铺经营数据",
+    "expected_intent": "GUIDE_NAVIGATION",
+    "expected_behavior": "navigate",
+    "expected_answer_or_action": "/merchant/stats",
+    "contexts": "「怎么看店铺经营数据」去经营数据看板 /merchant/stats。",
+    "category": "navigation"
+  },
+  {
+    "id": "E34",
+    "role": 2,
+    "question": "我是商家",
+    "expected_intent": "IDENTITY_CLAIM",
+    "expected_behavior": "answer",
+    "expected_answer_or_action": "先报系统解析出的真实身份",
+    "contexts": "用户自述「我是商家」时，系统只把它当作与解析身份对照的声明，仍以会话+库解析结果为准，并报出真实身份。",
+    "category": "identity"
+  },
+  {
+    "id": "E35",
+    "role": 2,
+    "question": "222:ij-555",
+    "expected_intent": "GOODS_QUERY",
+    "expected_behavior": "data",
+    "expected_answer_or_action": "按商品编号查询真实商品行",
+    "contexts": "商品类问题按商品名或编号查真实商品行（价格、划线价、分类、在售状态、库存）；查不到就明确说未找到，不编造。",
+    "category": "data_query"
+  }
+]

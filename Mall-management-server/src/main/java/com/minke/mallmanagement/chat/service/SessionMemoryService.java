@@ -178,7 +178,11 @@ public class SessionMemoryService {
                 || intent == ChatIntent.ADD_TO_SECKILL
                 || intent == ChatIntent.IDENTITY_CLAIM
                 // 连续澄清防复读：上一轮是 CLARIFY 时，下一轮要换话术。
-                || intent == ChatIntent.CLARIFY;
+                || intent == ChatIntent.CLARIFY
+                // 身份 / 越界请求要覆盖更早的 CLARIFY，否则后面的第一句乱码会被当成
+                // 「第二次澄清」而直接复读（2026-10-24 对抗性压测）。
+                || intent == ChatIntent.OUT_OF_SCOPE
+                || intent == ChatIntent.BOT_IDENTITY;
     }
 
     private static ChatIntent parse(String name) {

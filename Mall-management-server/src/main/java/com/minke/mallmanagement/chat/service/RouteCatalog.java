@@ -85,13 +85,15 @@ public final class RouteCatalog {
                     "好友与私信。用户说「好友 / 私信」时选它。", MERCHANT),
             new Route("/merchant/user/member", "会员中心",
                     "会员等级、积分、余额、优惠券与资产明细；平台没有独立的钱包页。"
-                            + "用户说「管理我的钱 / 我的钱 / 余额 / 积分 / 会员 / 资产 / 优惠券 / 钱包」时选它。", MERCHANT),
+                            + "用户说「管理我的钱 / 我的钱 / 余额 / 积分 / 会员 / 资产 / 优惠券 / "
+                            + "钱包 / 这个月花了多少钱 / 消费明细」时选它。", MERCHANT),
             new Route("/merchant/user/apply", "商家入驻申请",
                     "商家入驻 / 品牌加盟申请。用户说「开店 / 入驻 / 品牌加盟」时选它。", MERCHANT),
             new Route("/merchant/user/favorites", "我的收藏",
                     "收藏的商品。用户说「收藏 / 我收藏的东西」时选它。", MERCHANT),
             new Route("/merchant/stats", "经营数据",
-                    "店铺经营看板：销售额、订单量、趋势与库存。用户说「店铺数据 / 经营情况 / 销售报表 / 最近卖得怎么样」时选它。", MERCHANT),
+                    "店铺经营看板：销售额、订单量、趋势与库存。用户说「店铺数据 / 经营情况 / "
+                            + "销售报表 / 最近卖得怎么样 / 这个月赚了多少钱 / 收入 / 营业额」时选它。", MERCHANT),
             new Route("/merchant/seckill", "秒杀报名",
                     "选择商品参加平台秒杀。用户说「报名秒杀 / 参加活动 / 把商品上架到秒杀」时选它。", MERCHANT),
             new Route("/merchant/after-sales", "售后工作台",
@@ -121,7 +123,8 @@ public final class RouteCatalog {
                     "商家入驻 / 品牌加盟申请。用户说「开店 / 入驻 / 品牌加盟」时选它。", CUSTOMER),
             new Route("/customer/user/member", "会员中心",
                     "会员等级、积分、余额、优惠券与资产明细；平台没有独立的钱包页。"
-                            + "用户说「管理我的钱 / 我的钱 / 余额 / 积分 / 会员 / 资产 / 优惠券 / 钱包」时选它。", CUSTOMER),
+                            + "用户说「管理我的钱 / 我的钱 / 余额 / 积分 / 会员 / 资产 / 优惠券 / "
+                            + "钱包 / 这个月花了多少钱 / 消费明细」时选它。", CUSTOMER),
             new Route("/customer/user/favorites", "我的收藏",
                     "收藏的商品。用户说「收藏 / 我收藏的东西」时选它。", CUSTOMER)
     );

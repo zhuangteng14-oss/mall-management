@@ -1,0 +1,7 @@
+POST /chat/ask 连续 5 次：怎么看 222:ij-555 商品的详细数据
+
+#1 intent=GOODS_QUERY success=True reply=未找到商品「222:ij-555」。请核对商品名或编号后重试，也可以到商城搜索页按关键词搜索。
+#2 intent=GOODS_QUERY success=True reply=未找到商品「222:ij-555」。请核对商品名或编号后重试，也可以到商城搜索页按关键词搜索。
+#3 intent=GOODS_QUERY success=True reply=未找到商品「222:ij-555」。请核对商品名或编号后重试，也可以到商城搜索页按关键词搜索。
+#4 intent=GOODS_QUERY success=True reply=未找到商品「222:ij-555」。请核对商品名或编号后重试，也可以到商城搜索页按关键词搜索。
+#5 intent=GOODS_QUERY success=True reply=未找到商品「222:ij-555」。请核对商品名或编号后重试，也可以到商城搜索页按关键词搜索。

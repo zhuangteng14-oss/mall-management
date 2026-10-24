@@ -221,4 +221,40 @@ class ChatIntentRecognizerTest {
         assertThat(ChatIntentRecognizer.recognize("我是商家，怎么开店").intent())
                 .isEqualTo(ChatIntent.OPEN_STORE);
     }
+
+    @Test
+    @DisplayName("对抗性压测：消费 / 收入不是商品搜索，身份 / 越界请求单独成意图")
+    void adversarialPhrasesDoNotBecomeGoodsQuery() {
+        assertThat(ChatIntentRecognizer.recognize("帮我查一下这个月我花了多少钱买衣服？").intent())
+                .isEqualTo(ChatIntent.ASSET_QUERY);
+        assertThat(ChatIntentRecognizer.recognize("我这个月赚了多少钱？").intent())
+                .isEqualTo(ChatIntent.ASSET_QUERY);
+        assertThat(ChatIntentRecognizer.recognize("你是谁？你是GPT吗？").intent())
+                .isEqualTo(ChatIntent.BOT_IDENTITY);
+        assertThat(ChatIntentRecognizer.recognize("讲个笑话听听。").intent())
+                .isEqualTo(ChatIntent.OUT_OF_SCOPE);
+        assertThat(ChatIntentRecognizer.recognize("给我写一段Python代码。").intent())
+                .isEqualTo(ChatIntent.OUT_OF_SCOPE);
+    }
+
+    @Test
+    @DisplayName("「昨天看的那双鞋还有货吗」抽出「鞋」，且判为要搜索")
+    void stockQuestionExtractsHeadNoun() {
+        String text = ChatIntentRecognizer.normalize("昨天看的那双鞋还有货吗？");
+
+        assertThat(ChatIntentRecognizer.extractShoppingKeyword(text)).isEqualTo("鞋");
+        assertThat(ChatIntentRecognizer.looksLikeShopping(text)).isTrue();
+        assertThat(ChatIntentRecognizer.wantsSearch(text)).isTrue();
+    }
+
+    @Test
+    @DisplayName("售后情绪词能被识别，用于先道歉再报事实")
+    void upsetRefundPhrase() {
+        assertThat(ChatIntentRecognizer.looksUpset(
+                ChatIntentRecognizer.normalize("人呢？客服死哪去了，我的退款到底什么时候退！")))
+                .isTrue();
+        assertThat(ChatIntentRecognizer.looksUpset(
+                ChatIntentRecognizer.normalize("我的退款到哪了")))
+                .isFalse();
+    }
 }

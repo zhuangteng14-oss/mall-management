@@ -1,0 +1,3 @@
+anonymous-chat-ask       HTTP=401 pass=True targetPath=- intent=-
+customer-order-query     HTTP=200 pass=True targetPath=- intent=ORDER_QUERY
+merchant-workbench       HTTP=200 pass=True targetPath=/merchant/user intent=MERCHANT_DASHBOARD

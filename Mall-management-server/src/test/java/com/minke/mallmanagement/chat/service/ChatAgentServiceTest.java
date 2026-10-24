@@ -607,7 +607,8 @@ class ChatAgentServiceTest {
 
         assertThat(resp.get("intent")).isEqualTo("FAQ");
         assertThat(String.valueOf(resp.get("reply")))
-                .isEqualTo("支持7天无理由，但需保证不影响二次销售哦。");
+                .isEqualTo("已拆封的商品，若不影响二次销售（吊牌、包装完整）可在 7 天内无理由退货；"
+                        + "如果是质量问题（比如东西坏了），拆封也可以退换，运费由商家承担。");
         verify(refundService, org.mockito.Mockito.never())
                 .myRefunds(anyString(), anyInt());
     }
@@ -732,7 +733,8 @@ class ChatAgentServiceTest {
 
         assertThat(resp.get("intent")).isEqualTo("FAQ");
         assertThat(String.valueOf(resp.get("reply")))
-                .isEqualTo("支持7天无理由，但需保证不影响二次销售哦。");
+                .isEqualTo("已拆封的商品，若不影响二次销售（吊牌、包装完整）可在 7 天内无理由退货；"
+                        + "如果是质量问题（比如东西坏了），拆封也可以退换，运费由商家承担。");
         verify(refundService, org.mockito.Mockito.never()).myRefunds(anyString(), anyInt());
     }
 
@@ -786,7 +788,7 @@ class ChatAgentServiceTest {
         // 后端不返回步骤数组：怎么走是前端 NavGraph 的事。
         assertThat(resp).doesNotContainKey("steps");
         // 「幽灵前缀」修复：回复不再拼页面描述（否则页面选错时会先冒出「收藏的商品。」）。
-        assertThat(String.valueOf(resp.get("reply"))).isEqualTo("好的，我来一步步教您。点击下方按钮开始。");
+        assertThat(String.valueOf(resp.get("reply"))).isEqualTo("好的，我带您去「经营数据」，点下面按钮开始。");
     }
 
     @Test
@@ -1271,7 +1273,7 @@ class ChatAgentServiceTest {
         assertThat(actionOf(resp)).containsEntry("type", "tour")
                 .containsEntry("targetPath", "/merchant/user/list")
                 .containsEntry("label", "开始引导");
-        assertThat(resp.get("reply")).isEqualTo("好的，我来一步步教您。点击下方按钮开始。");
+        assertThat(resp.get("reply")).isEqualTo("好的，我带您去「查看商品」，点下面按钮开始。");
         assertThat(String.valueOf(resp.get("reply"))).doesNotContain("收藏");
         verify(llmClassifier, never()).classify(anyString(), any(), anyString());
     }
@@ -1288,7 +1290,7 @@ class ChatAgentServiceTest {
         assertThat(resp.get("intent")).isEqualTo("MERCHANT_DASHBOARD");
         assertThat(actionOf(resp)).containsEntry("targetPath", "/merchant/user")
                 .containsEntry("type", "tour");
-        assertThat(resp.get("reply")).isEqualTo("好的，我来一步步教您。点击下方按钮开始。");
+        assertThat(resp.get("reply")).isEqualTo("好的，我带您去「个人中心」，点下面按钮开始。");
     }
 
     @Test
@@ -1447,6 +1449,147 @@ class ChatAgentServiceTest {
         Map<String, Object> resp = service.ask("oppo12 多少钱", "c1", 1);
 
         assertThat(resp.get("intent")).isEqualTo("GOODS_QUERY");
+    }
+
+    // ==================== 对抗性压测的确定性闸（2026-10-24） ====================
+
+    @Test
+    @DisplayName("对抗性：问「这个月花了多少钱」⇒ 资产查询 + 会员中心，不当成搜商品")
+    void spendingGoesToMemberCenter() {
+        Map<String, Object> resp = service.ask("帮我查一下这个月我花了多少钱买衣服？", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("ASSET_QUERY");
+        assertThat(actionOf(resp)).containsEntry("type", "tour")
+                .containsEntry("targetPath", "/customer/user/member");
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("钱包余额、优惠券和收支流水", "会员中心");
+        // 确定性闸在语义 / LLM 之前，不能让模型把它吸到商品搜索。
+        verify(llmClassifier, never()).classify(anyString(), any(), any());
+    }
+
+    @Test
+    @DisplayName("对抗性：商家问「这个月赚了多少钱」⇒ 经营数据，不当成搜商品")
+    void merchantRevenueGoesToStats() {
+        Map<String, Object> resp = service.ask("我这个月赚了多少钱？", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("GUIDE_NAVIGATION");
+        assertThat(actionOf(resp)).containsEntry("type", "tour")
+                .containsEntry("targetPath", "/merchant/stats");
+        assertThat(String.valueOf(resp.get("reply"))).contains("经营数据");
+    }
+
+    @Test
+    @DisplayName("对抗性：问优惠券 / 能不能便宜 ⇒ 会员中心，而不是泛泛的兜底话术")
+    void couponGoesToMemberCenter() {
+        Map<String, Object> resp = service.ask("有优惠券吗？能便宜点不？", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("GUIDE_NAVIGATION");
+        assertThat(actionOf(resp)).containsEntry("type", "tour")
+                .containsEntry("targetPath", "/customer/user/member");
+        assertThat(String.valueOf(resp.get("reply"))).contains("会员中心");
+    }
+
+    @Test
+    @DisplayName("对抗性：问「你是谁 / 是不是 GPT」⇒ 如实说明是商城客服，不冒充通用模型")
+    void botIdentityAnswersHonestly() {
+        Map<String, Object> resp = service.ask("你是谁？你是GPT吗？", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("BOT_IDENTITY");
+        assertThat(resp.get("reply")).isEqualTo(
+                "我是米可小助手，商城的智能客服，不是 GPT 之类的通用模型。"
+                        + "我可以帮你查订单、售后，或带你去搜索商品。");
+        assertThat(String.valueOf(resp.get("reply"))).doesNotContain("没太听懂");
+    }
+
+    @Test
+    @DisplayName("对抗性：讲笑话 / 写代码 ⇒ 礼貌拒答并拉回电商，不暴露「不知道你在说什么」")
+    void outOfScopeRefusesPolitely() {
+        Map<String, Object> joke = service.ask("讲个笑话听听。", "c1", 1);
+        Map<String, Object> code = service.ask("给我写一段Python代码。", "c1", 1);
+
+        assertThat(joke.get("intent")).isEqualTo("OUT_OF_SCOPE");
+        assertThat(code.get("intent")).isEqualTo("OUT_OF_SCOPE");
+        assertThat(String.valueOf(joke.get("reply")))
+                .contains("商城的智能客服").doesNotContain("没太听懂");
+        assertThat(String.valueOf(code.get("reply")))
+                .contains("商城的智能客服").doesNotContain("没太听懂");
+        // 越界请求要覆盖上一轮上下文，否则下一句乱码会被当成「第二次澄清」而复读。
+        verify(memoryService).remember(eq("c1"), eq("讲个笑话听听。"),
+                eq(ChatIntent.OUT_OF_SCOPE), isNull(), anyString());
+    }
+
+    @Test
+    @DisplayName("对抗性：越界请求之后的第一句乱码，仍用首次澄清话术（不复读）")
+    void outOfScopeDoesNotPoisonNextClarify() {
+        when(memoryService.lastContext("c1"))
+                .thenReturn(new SessionMemoryService.Context(ChatIntent.OUT_OF_SCOPE, null));
+        // 真实环境里乱码会先过语义层：低分 ⇒ CLARIFY。单测把这条路径显式造出来。
+        when(semanticRouter.route(eq("asdfghjkl"), eq(1)))
+                .thenReturn(new SemanticRouter.Result(ChatIntent.ORDER_QUERY,
+                        null, 0.42, "查我的订单", 0.38, false));
+
+        Map<String, Object> resp = service.ask("asdfghjkl", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("CLARIFY");
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("没太听懂您的意思")
+                .doesNotContain("抱歉，我还是没太听懂");
+    }
+
+    @Test
+    @DisplayName("对抗性：带情绪的退款催问 ⇒ 先致歉再报退款状态，并给「联系人工客服」")
+    void upsetRefundStartsWithApology() {
+        Map<String, Object> row = new HashMap<>();
+        row.put("OrderId", "r2vfwK6z3E");
+        row.put("RefundStatus", 1);
+        row.put("RefundAmount", 199.0);
+        row.put("RefundReason", "不想要了");
+        row.put("RefundApplyAt", "2026-10-20 10:00:00");
+        row.put("RefundRetryCount", 0);
+        when(refundService.myRefunds("c1", 1))
+                .thenReturn(Map.of("success", true, "list", List.of(row)));
+
+        Map<String, Object> resp = service.ask("人呢？客服死哪去了，我的退款到底什么时候退！", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("REFUND_QUERY");
+        assertThat(String.valueOf(resp.get("reply")))
+                .startsWith("非常抱歉让您久等了。").contains("待商家审核", "¥199.00");
+        assertThat(String.valueOf(resp.get("suggestions"))).contains("联系人工客服");
+    }
+
+    @Test
+    @DisplayName("对抗性：话术模型已先道歉时不再前缀「非常抱歉」，避免连续两句抱歉")
+    void empathyIsNotDoubledWhenComposerAlreadyApologises() {
+        Map<String, Object> row = new HashMap<>();
+        row.put("OrderId", "r2vfwK6z3E");
+        row.put("RefundStatus", 1);
+        row.put("RefundAmount", 199.0);
+        row.put("RefundRetryCount", 0);
+        when(refundService.myRefunds("c1", 1))
+                .thenReturn(Map.of("success", true, "list", List.of(row)));
+        when(replyComposer.isEnabled()).thenReturn(true);
+        when(replyComposer.compose(anyString(), eq("REFUND_QUERY"), anyString()))
+                .thenReturn("实在抱歉让您久等了，非常理解您着急的心情。您这笔售后正在待商家审核。");
+
+        Map<String, Object> resp = service.ask("人呢？我的退款到底什么时候退！", "c1", 1);
+
+        assertThat(resp.get("reply")).isEqualTo(
+                "实在抱歉让您久等了，非常理解您着急的心情。您这笔售后正在待商家审核。");
+    }
+
+    @Test
+    @DisplayName("对抗性：最新一笔已取消却问「发货没 / 快递卡哪」⇒ 明说没有物流，请补单号")
+    void cancelledOrderShippingQuestionIsClarified() {
+        Map<String, Object> cancelled = order("cancelled01", "跑步护膝", 0, 0, 0);
+        cancelled.put("CancelledAt", "2026-10-19 09:00:00");
+        when(orderDao.countByCustomer("c1")).thenReturn(1L);
+        when(orderDao.selectRecentByCustomer(eq("c1"), anyInt())).thenReturn(List.of(cancelled));
+
+        Map<String, Object> resp = service.ask("那个快递怎么还没到，卡在哪儿了？", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("ORDER_QUERY");
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("已取消", "没有发货和物流记录", "把单号发我");
     }
 
     @SuppressWarnings("unchecked")

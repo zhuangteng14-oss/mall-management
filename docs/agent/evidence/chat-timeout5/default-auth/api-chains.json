@@ -1,0 +1,44 @@
+[
+  {
+    "case": "anonymous-chat-ask",
+    "http": 401,
+    "wallMs": 32,
+    "body": {
+      "success": false,
+      "msg": "未登录"
+    },
+    "raw": "{\"success\":false,\"msg\":\"未登录\"}",
+    "pass": true
+  },
+  {
+    "case": "customer-order-query",
+    "loginRole": "1",
+    "http": 200,
+    "wallMs": 5582,
+    "success": true,
+    "intent": "ORDER_QUERY",
+    "reply": "您最近的三笔订单都已经是已取消状态了，分别是BROR943184306407、SIM-BURST-70862-1328和SIM-BURST-70862-1327，下单时间都是2026年10月20日。",
+    "dataKeys": [
+      "total",
+      "orders"
+    ],
+    "pass": true
+  },
+  {
+    "case": "merchant-workbench",
+    "loginRole": "2",
+    "http": 200,
+    "wallMs": 3529,
+    "success": true,
+    "intent": "GUIDE_NAVIGATION",
+    "action": {
+      "type": "tour",
+      "targetPath": "/merchant/after-sales",
+      "targetLabel": "售后工作台",
+      "label": "开始引导"
+    },
+    "targetPath": "/merchant/after-sales",
+    "reply": "好的，我来一步步教您。点击下方按钮开始。",
+    "pass": false
+  }
+]

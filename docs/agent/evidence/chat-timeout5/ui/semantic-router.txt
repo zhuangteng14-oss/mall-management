@@ -1,0 +1,14 @@
+PASS  商家登录落 /merchant  {"hash":"#/merchant"}
+FAIL  「怎么看我上架的商品」⇒ GOODS_MANAGE + /merchant/user/list  {"intent":"GOODS_QUERY","action":null}
+FAIL  回复只有引导语，无「收藏的商品」幽灵前缀  {"reply":"请告诉我要查哪个商品：把商品名或编号发我（例如「oppo12」或「222:ij-555」），我帮你查价格、库存和在售状态。"}
+FAIL  GOODS_MANAGE 的【开始引导】胶囊可点
+FAIL  探针异常中止  "TypeError: Cannot read properties of null (reading 'x')\n    at clickPoint (file:///C:/Users/86159/Desktop/%E8%BD%AF%E4%BB%B6%E5%B7%A5%E7%A8%8B/%E6%9C%9F%E6%9C%AB%E9%A1%B9%E7%9B%AE/scripts/probes/probe-chat-semantic-router.mjs:116:71)\n    at file:///C:/Users/86159/Desktop/%E8%BD%AF%E4%BB%B6%E5%B7%A5%E7%A8%8B/%E6%9C%9F%E6%9C%AB%E9%A1%B9%E7%9B%AE/scripts/probes/probe-chat-semantic-router.mjs:170:9\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)"
+
+PASS  商家登录落 /merchant  {"hash":"#/merchant"}
+FAIL  「怎么看我上架的商品」⇒ GOODS_MANAGE + /merchant/user/list  {"intent":"GOODS_QUERY","action":null}
+FAIL  回复只有引导语，无「收藏的商品」幽灵前缀  {"reply":"请告诉我要查哪个商品：把商品名或编号发我（例如「oppo12」或「222:ij-555」），我帮你查价格、库存和在售状态。"}
+FAIL  GOODS_MANAGE 的【开始引导】胶囊可点
+FAIL  探针异常中止  "TypeError: Cannot read properties of null (reading 'x')\n    at clickPoint (file:///C:/Users/86159/Desktop/%E8%BD%AF%E4%BB%B6%E5%B7%A5%E7%A8%8B/%E6%9C%9F%E6%9C%AB%E9%A1%B9%E7%9B%AE/scripts/probes/probe-chat-semantic-router.mjs:116:71)\n    at file:///C:/Users/86159/Desktop/%E8%BD%AF%E4%BB%B6%E5%B7%A5%E7%A8%8B/%E6%9C%9F%E6%9C%AB%E9%A1%B9%E7%9B%AE/scripts/probes/probe-chat-semantic-router.mjs:170:9\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)"
+
+合计 5 项 / 4 失败
+页面截图：C:/Users/86159/Desktop/软件工程/期末项目/docs/agent/evidence/chat-semantic-router

@@ -1,0 +1,17 @@
+label,model,run,outcome,latencyMs,cause,http,inputTokens,outputTokens,requestId
+air,glm-4-air,1,ok,1436,-,200,2150,48,e3ba3aff-a320-40f8-9871-600c652e3844
+flash,glm-4-flash,1,ok,4022,-,200,2146,27,5244c0d4-06ab-40c3-85e7-3a2ffdef64c5
+flash,glm-4-flash,1,ok,4845,-,200,2146,27,4fa673e2-8535-444d-8cf4-c2174ca2b2ad
+air,glm-4-air,1,ok,1217,-,200,2150,48,4de3e9af-e83f-4066-b5aa-623abb465a6a
+air,glm-4-air,1,ok,1311,-,200,2150,48,864d7669-0346-4888-9195-e23eb6bd891a
+flash,glm-4-flash,1,ok,4129,-,200,2146,27,2d46bde0-a49f-4fff-86e0-c08ba8e4ddc7
+flash,glm-4-flash,1,ok,3869,-,200,2146,27,24cae01d-5f3d-42e5-b6a7-4faae2d358b7
+air,glm-4-air,1,ok,1283,-,200,2150,48,24e8c5a0-8439-4e9c-8c45-2e948ba05db6
+air,glm-4-air,1,ok,1340,-,200,2150,48,8fe2a4d5-8302-4b89-837c-4049adc0c3a6
+flash,glm-4-flash,1,ok,3118,-,200,2146,27,7d8a4c8a-169c-47eb-a927-64b9a4fc79ee
+flash,glm-4-flash,1,ok,4097,-,200,2146,31,a537be7e-8385-4be1-a8d4-ba88e8650d08
+air,glm-4-air,1,ok,1110,-,200,2150,48,6ce2dc9c-5648-4012-b2d0-9b38d726e41d
+air,glm-4-air,1,ok,1238,-,200,2150,48,630ead7b-456c-40d4-a7ca-151c2b58e6cc
+flash,glm-4-flash,1,ok,3378,-,200,2146,31,21bd37eb-52d9-4b01-9b5a-4e7f7ceed4a1
+flash,glm-4-flash,1,ok,4620,-,200,2146,27,cda692b2-5962-4aa9-8922-1cf6080ea11a
+air,glm-4-air,1,ok,1192,-,200,2150,48,e056ea24-26b2-41a1-85f6-3821a0de60af

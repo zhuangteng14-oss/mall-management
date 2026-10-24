@@ -108,7 +108,8 @@ public final class ChatIntentRecognizer {
     private static final Pattern SHOPPING_MARK = Pattern.compile(
             "在哪(?:里)?(?:买|购买|购)|哪里(?:买|购买)|怎么(?:买|购买)|如何(?:买|购买)|"
                     + "想(?:要)?买|要买|买个|买一个|买一件|买一台|买一双|买一只|购买|入手|"
-                    + "搜索|搜一下|搜|找一?个|找一下|帮我找|有没有(?:卖|货)|有卖|多少钱|什么价");
+                    + "搜索|搜一下|搜|找一?个|找一下|帮我找|有没有(?:卖|货)|有卖|有货|有库存|"
+                    + "多少钱|什么价");
 
     /**
      * 明确的「找 / 买 / 搜」动作 —— 命中即给「去商城搜索」动作（而不只是商品卡）。
@@ -117,7 +118,7 @@ public final class ChatIntentRecognizer {
     private static final Pattern SEARCH_ACTION = Pattern.compile(
             "在哪(?:里)?(?:买|购买|购)|哪里(?:买|购买)|怎么(?:买|购买)|如何(?:买|购买)|"
                     + "购买|想(?:要)?买|要买|买个|买一个|买一件|买一台|买一双|买一只|买|入手|"
-                    + "搜索|搜一下|搜|找一?个|找一下|帮我找");
+                    + "搜索|搜一下|搜|找一?个|找一下|帮我找|有货|有库存|还有货");
 
     /** 动作触发词之后的花括号：优先长词，避免「买」抢在「购买」前面只吃到半截。 */
     private static final Pattern SHOPPING_AFTER = Pattern.compile(
@@ -131,14 +132,49 @@ public final class ChatIntentRecognizer {
                     + "怎么(?:买|购买)|多少钱|什么价|价格|有卖|有货|有卖吗|有没有|有吗|"
                     + "怎么卖|好用吗|怎么样)");
 
+    /**
+     * 「这个月花了多少钱」—— 查消费金额，不是找商品（2026-10-24 对抗性压测）。
+     * 必须排在购物规则之前：{@code 花了多少钱买衣服} 同时含「多少钱」。
+     */
+    private static final Pattern SPENDING = Pattern.compile(
+            "花了多少|花掉多少|消费了多少|消费多少|总共花|一共花|花出去多少|支出多少|"
+                    + "(?:这个月|本月|上个月).{0,8}花|(?:这个月|本月|上个月).{0,8}消费");
+
+    /** 商家收入 / 营业额 —— 落经营数据，不是商品搜索。 */
+    private static final Pattern MERCHANT_REVENUE = Pattern.compile(
+            "赚了多少|赚了多少钱|收入多少|营收|营业额|销售额|利润|"
+                    + "(?:这个月|本月|上个月).{0,6}赚");
+
+    /** 优惠券 / 折扣 —— 落会员中心（券与权益都在那里）。 */
+    private static final Pattern COUPON = Pattern.compile(
+            "优惠券|优惠码|满减|代金券|折扣|便宜点|便宜些|有没有券");
+
+    /** 问客服自己是谁 —— 不能答成普通问候。 */
+    private static final Pattern BOT_IDENTITY = Pattern.compile(
+            "你是谁|你叫什么|你是(?:不是)?(?:gpt|GPT|chatgpt|ChatGPT|机器人|ai|AI|真人)|"
+                    + "你是什么(?:东西|模型|助手)|你是男是女");
+
+    /** 与商城无关的请求：礼貌拒答，不暴露「没听懂」。 */
+    private static final Pattern OUT_OF_SCOPE = Pattern.compile(
+            "讲个笑话|说个笑话|来个笑话|笑话|写(?:一段|一个|个|段)?(?:python|Python|PYTHON|"
+                    + "java|Java|代码|程序)|(?:python|Python|java|Java)代码|编程|写诗|作诗|"
+                    + "唱首歌|讲个故事|做数学题|翻译一下");
+
+    /** 售后的情绪词：回复要先道歉，再给事实。 */
+    private static final Pattern UPSET = Pattern.compile(
+            "死哪|人呢|到底什么时候|怎么还没|投诉|气死|催|等很久|等了很久|还不退|没人管");
+
     /** 名词候选的截断点（出现即止，避免把整句后半段当商品名）。 */
     private static final List<String> NOUN_STOPS = List.of(
             "在哪", "哪里", "怎么买", "怎么购买", "如何买", "多少钱", "什么价", "价格",
-            "有卖", "有货", "吗", "呢", "呀", "啊", "吧", "？", "?", "。", "，", ",", "！", "!");
+            "有卖", "有货", "还有", "还", "吗", "呢", "呀", "啊", "吧", "？", "?", "。",
+            "，", ",", "！", "!");
 
     /** 名词候选两端的口头语 / 量词 / 泛称。 */
     private static final List<String> NOUN_LEAD = List.of(
-            "这个", "那个", "这款", "那款", "一款", "一个", "一件", "一双", "一台", "一只",
+            "昨天看的", "前天看的", "刚才看的", "上次看的", "之前看的", "白天看的",
+            "这个", "那个", "这款", "那款", "那双", "这双", "那件", "这件", "那条", "这条",
+            "一款", "一个", "一件", "一双", "一台", "一只",
             "这", "那", "我", "想", "要", "个");
     private static final List<String> NOUN_TAIL = List.of(
             "这个商品", "这款商品", "的商品", "商品", "东西", "宝贝", "货品", "产品", "物品");
@@ -206,6 +242,13 @@ public final class ChatIntentRecognizer {
             intent = ChatIntent.ADD_TO_SECKILL;
         } else if (OPEN_STORE.matcher(text).find()) {
             intent = ChatIntent.OPEN_STORE;
+        } else if (looksLikeBotIdentity(text)) {
+            intent = ChatIntent.BOT_IDENTITY;
+        } else if (looksLikeOutOfScope(text)) {
+            intent = ChatIntent.OUT_OF_SCOPE;
+        } else if (looksLikeSpending(text) || looksLikeMerchantRevenue(text)) {
+            // 「这个月花了 / 赚了多少钱」是查流水与经营数据，不是找商品。
+            intent = ChatIntent.ASSET_QUERY;
         } else if (looksLikeShopping(text)) {
             // 买 / 搜 / 在哪购买 —— 与查价同归 GOODS_QUERY；商家身份同样适用。
             intent = ChatIntent.GOODS_QUERY;
@@ -336,6 +379,36 @@ public final class ChatIntentRecognizer {
                 && SEARCH_ACTION.matcher(normalized).find();
     }
 
+    /** 查消费金额（「这个月花了多少钱」），落会员中心流水。 */
+    static boolean looksLikeSpending(String normalized) {
+        return normalized != null && SPENDING.matcher(normalized).find();
+    }
+
+    /** 商家问收入 / 营业额，落经营数据，不是商品搜索。 */
+    static boolean looksLikeMerchantRevenue(String normalized) {
+        return normalized != null && MERCHANT_REVENUE.matcher(normalized).find();
+    }
+
+    /** 优惠券 / 折扣问题，落会员中心。 */
+    static boolean looksLikeCoupon(String normalized) {
+        return normalized != null && COUPON.matcher(normalized).find();
+    }
+
+    /** 问「你是谁 / 是不是 GPT」。 */
+    static boolean looksLikeBotIdentity(String normalized) {
+        return normalized != null && BOT_IDENTITY.matcher(normalized).find();
+    }
+
+    /** 与商城无关的请求（笑话 / 代码 / 写诗）。 */
+    static boolean looksLikeOutOfScope(String normalized) {
+        return normalized != null && OUT_OF_SCOPE.matcher(normalized).find();
+    }
+
+    /** 售后情绪词（死哪去了 / 到底什么时候退）。 */
+    static boolean looksUpset(String normalized) {
+        return normalized != null && UPSET.matcher(normalized).find();
+    }
+
     /**
      * 从购物句里取商品名 —— 支持中文名（护膝 / 蓝牙耳机 / 手机壳）与型号（oppo12）。
      *
@@ -405,7 +478,10 @@ public final class ChatIntentRecognizer {
             }
         }
         s = s.trim();
-        if (s.length() < 2 || GENERIC_NOUNS.contains(s)) {
+        // 单字中文商品名（「鞋」「裙」）也是有效搜索词；英文 / 数字仍要求 2 位以上。
+        boolean singleCjk = s.length() == 1
+                && s.charAt(0) >= '一' && s.charAt(0) <= '龥';
+        if ((!singleCjk && s.length() < 2) || GENERIC_NOUNS.contains(s)) {
             return null;
         }
         return s;

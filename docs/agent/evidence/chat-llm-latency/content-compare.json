@@ -1,0 +1,22 @@
+{
+  "glm-4-flash": {
+    "latencyUnavailable": true,
+    "usage": {
+      "completion_tokens": 31,
+      "prompt_tokens": 2146,
+      "total_tokens": 2177
+    },
+    "content": "```json\n{\"intent\": \"GUIDE_NAVIGATION\", \"tool\": \"navigate\", \"target_path\": \"/merchant/after-sales\"}\n```",
+    "requestId": "0d31323b-a15b-440e-b7ab-c95c06d3fb83"
+  },
+  "glm-4-air": {
+    "latencyUnavailable": true,
+    "usage": {
+      "completion_tokens": 48,
+      "prompt_tokens": 2150,
+      "total_tokens": 2198
+    },
+    "content": "```json\n{\"intent\": \"GUIDE_NAVIGATION\", \"tool\": \"navigate\", \"target_path\": \"/merchant/user\", \"slots\": {\"orderId\": null, \"goodsKeyword\": null, \"need_publish\": false}}\n```",
+    "requestId": "ed166377-924e-4c88-9da1-05c1dd11af37"
+  }
+}

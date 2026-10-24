@@ -1,0 +1,29 @@
+Embedding 配额耗尽证据（2026-10-24 20:15 / 20:25 实测）
+
+一、单次直连（Python requests，不打印 Key）
+POST https://open.bigmodel.cn/api/paas/v4/embeddings
+model=embedding-3
+HTTP 429
+{"error": {"code": "1113", "message": "余额不足或无可用资源包,请充值。"}}
+
+二、同一 Key、同一时刻的对照
+POST https://open.bigmodel.cn/api/paas/v4/chat/completions
+model=glm-4-flash
+HTTP 200（正常返回 choices）
+
+结论：不是 Key 失效、不是网络问题；是 embedding-3 这个模型的资源包/余额不足。
+glm-4-flash 仍有可用额度，所以聊天主链路能跑，但语义路由的向量化全部失败。
+
+三、后端日志（dev 与 default 两个 profile 都复现）
+[dev   20:14:20] WARN SemanticRouter - 语义路由预加载失败（...EmbeddingException: Embedding HTTP 429）
+[dev   20:15:06] WARN SemanticRouter - 语义路由预加载失败（...EmbeddingException: Embedding HTTP 429）
+[default 20:24:54] WARN SemanticRouter - 语义路由预加载失败（...EmbeddingException: Embedding HTTP 429）
+
+四、影响面
+SemanticRouter.route() 在 entries 未加载时返回 null ⇒ 所有语义路由退化为 LLM 分类。
+- MERCHANT_DASHBOARD / GOODS_MANAGE / ASSET_QUERY 是**语义路由专有意图**，
+  LlmIntentClassifier.ALLOWED 白名单里没有它们 ⇒ 纯 Flash 路径无法产出这些意图。
+- 因此「怎么前往商家工作台」被 LLM 判成 GUIDE_NAVIGATION，落到 /merchant/after-sales；
+  「怎么看我上架的商品」被判成 GOODS_QUERY。
+- 这不是本轮超时改动引入的回归：改动只动了 LlmIntentClassifier / LlmReplyComposer
+  的 TIMEOUT_SECONDS（3→5），SemanticRouter / 语义阈值 / Prompt 均未动。

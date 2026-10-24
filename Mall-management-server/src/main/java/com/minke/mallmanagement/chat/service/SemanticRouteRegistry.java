@@ -70,14 +70,20 @@ final class SemanticRouteRegistry {
                     "我要报名秒杀", "参加平台活动", "商品上架到秒杀",
                     "我的新商品要上架秒杀页"),
 
-            // 「钱花哪了」不是查订单 —— 余额 / 流水都在会员中心。
+            // 「钱花哪了」不是查订单 —— 余额 / 流水 / 优惠券都在会员中心。
             route(ChatIntent.ASSET_QUERY, "/customer/user/member", BOTH,
-                    "我花出去的钱去哪了", "查询余额和流水", "我的钱花哪了", "账户资产明细",
-                    "我要管理我的钱"),
+                    "我花出去的钱去哪了", "我的钱花哪了", "我要管理我的钱",
+                    "这个月花了多少钱", "本月消费多少"),
+            // 优惠券 / 折扣：券和会员权益都在会员中心（2026-10-24 对抗性压测）。
+            route(ChatIntent.GUIDE_NAVIGATION, "/customer/user/member", CUSTOMER,
+                    "有优惠券吗", "能便宜点吗", "优惠券在哪领", "有没有满减券"),
+            route(ChatIntent.GUIDE_NAVIGATION, "/merchant/user/member", MERCHANT,
+                    "有优惠券吗", "能便宜点吗", "优惠券在哪领", "有没有满减券"),
 
             // ── 页面导航（沿用 GUIDE_NAVIGATION，默认逐步引导） ─────────────────
             route(ChatIntent.GUIDE_NAVIGATION, "/merchant/stats", MERCHANT,
-                    "怎么看店铺经营数据", "销售额和订单量", "店铺最近卖得怎么样"),
+                    "怎么看店铺经营数据", "销售额和订单量", "店铺最近卖得怎么样",
+                    "这个月赚了多少钱", "店铺收入怎么样", "营业额是多少"),
             route(ChatIntent.GUIDE_NAVIGATION, "/merchant/user/add", MERCHANT,
                     "怎么上架商品", "发布新商品", "新增商品怎么操作"),
             route(ChatIntent.GUIDE_NAVIGATION, "/merchant/after-sales", MERCHANT,
@@ -108,6 +114,10 @@ final class SemanticRouteRegistry {
             // ── 规则兜底类（语义层也登记，避免「你好」被澄清） ────────────────
             route(ChatIntent.IDENTITY_CLAIM, null, BOTH,
                     "我是商家", "我是卖家", "我是品牌商家"),
+            route(ChatIntent.BOT_IDENTITY, null, BOTH,
+                    "你是谁", "你是GPT吗", "你是机器人吗", "你叫什么名字"),
+            route(ChatIntent.OUT_OF_SCOPE, null, BOTH,
+                    "讲个笑话", "给我写一段Python代码", "你会写代码吗", "讲个故事"),
             route(ChatIntent.FAQ, null, BOTH,
                     "拆封了能退货吗", "平台售后政策是什么", "七天无理由怎么算"),
             route(ChatIntent.GREETING, null, BOTH,

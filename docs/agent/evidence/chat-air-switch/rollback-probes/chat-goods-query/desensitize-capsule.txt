@@ -1,0 +1,12 @@
+商品查询回复的脱敏与胶囊判据（oppo12 多少钱）
+
+reply=为您查到商品「oppo12」，当前售价 ¥1886.00，库存充足，分类 电子用品，正在热卖中。您可以点击下方按钮，我直接带您去详情页看看。
+data.goods[0]={"name": "oppo12", "price": 1886.0, "stock": 400, "stockLabel": "库存充足", "category": "电子用品", "state": "在售"}
+suggestions=[{"label": "带我去商品详情", "routeKey": "goods", "keyword": "oppo12"}, "查我的订单", "怎么开店"]
+
+PASS  回复不含店铺号 5N1k5K2guh
+PASS  回复不含内部编号 OP2
+PASS  回复不含内部 Id 字段名
+PASS  回复含库存话术
+PASS  data.goods 只含买家字段
+PASS  胶囊：带我去商品详情 / routeKey=goods

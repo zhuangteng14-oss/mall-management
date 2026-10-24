@@ -24,7 +24,7 @@ class FaqKnowledgeBaseTest {
 
         assertThat(answer).isNotNull();
         assertThat(answer.policy()).isTrue();
-        assertThat(answer.text()).isEqualTo("支持7天无理由，但需保证不影响二次销售哦。");
+        assertThat(answer.text()).contains("已拆封", "质量问题", "运费由商家承担");
     }
 
     @Test

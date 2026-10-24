@@ -1,0 +1,68 @@
+[
+  {
+    "viewport": 1440,
+    "found": true,
+    "display": "flex",
+    "visibility": "visible",
+    "width": 280,
+    "height": 34,
+    "top": 16,
+    "inputWidth": 231,
+    "innerWidth": 1440
+  },
+  {
+    "viewport": 1280,
+    "found": true,
+    "display": "flex",
+    "visibility": "visible",
+    "width": 280,
+    "height": 34,
+    "top": 16,
+    "inputWidth": 231,
+    "innerWidth": 1280
+  },
+  {
+    "viewport": 1024,
+    "found": true,
+    "display": "flex",
+    "visibility": "visible",
+    "width": 280,
+    "height": 34,
+    "top": 16,
+    "inputWidth": 231,
+    "innerWidth": 1024
+  },
+  {
+    "viewport": 900,
+    "found": true,
+    "display": "flex",
+    "visibility": "visible",
+    "width": 280,
+    "height": 34,
+    "top": 16,
+    "inputWidth": 231,
+    "innerWidth": 900
+  },
+  {
+    "viewport": 861,
+    "found": true,
+    "display": "flex",
+    "visibility": "visible",
+    "width": 280,
+    "height": 34,
+    "top": 16,
+    "inputWidth": 231,
+    "innerWidth": 861
+  },
+  {
+    "viewport": 860,
+    "found": true,
+    "display": "flex",
+    "visibility": "visible",
+    "width": 809,
+    "height": 34,
+    "top": 65,
+    "inputWidth": 760,
+    "innerWidth": 860
+  }
+]

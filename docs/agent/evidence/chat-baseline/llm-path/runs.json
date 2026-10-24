@@ -1,0 +1,1104 @@
+[
+  {
+    "group": "B",
+    "sentence": "怎么看我上架的商品",
+    "run": 1,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 3034,
+    "traceId": "ae561063-6f10-4f6b-9c28-0c04f546886d",
+    "trace": {
+      "traceId": "ae561063-6f10-4f6b-9c28-0c04f546886d",
+      "intent": "GUIDE_NAVIGATION",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "navigate",
+      "toolSuccess": "true",
+      "totalLatencyMs": "3026",
+      "finalBranch": "tool:navigate",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:11:22.071  INFO 87500 --- [http-nio-8088-exec-3] [ae561063-6f10-4f6b-9c28-0c04f546886d] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=ae561063-6f10-4f6b-9c28-0c04f546886d intent=GUIDE_NAVIGATION semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=navigate toolSuccess=true totalLatencyMs=3026 finalBranch=tool:navigate degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "action": {
+        "type": "tour",
+        "targetPath": "/merchant/user/add",
+        "targetLabel": "上架商品",
+        "label": "开始引导"
+      },
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "intent": "GUIDE_NAVIGATION"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "怎么看我上架的商品",
+    "run": 2,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 2293,
+    "traceId": "590ad952-03b7-475a-9130-2e39aaded08e",
+    "trace": {
+      "traceId": "590ad952-03b7-475a-9130-2e39aaded08e",
+      "intent": "GOODS_QUERY",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "none",
+      "toolName": "query_goods",
+      "toolSuccess": "true",
+      "totalLatencyMs": "2289",
+      "finalBranch": "tool:query_goods",
+      "degradeReason": "none"
+    },
+    "trace_line": "2026-10-24 14:11:24.620  INFO 87500 --- [http-nio-8088-exec-4] [590ad952-03b7-475a-9130-2e39aaded08e] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=590ad952-03b7-475a-9130-2e39aaded08e intent=GOODS_QUERY semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=none toolName=query_goods toolSuccess=true totalLatencyMs=2289 finalBranch=tool:query_goods degradeReason=none",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "怎么开店"
+      ],
+      "reply": "请告诉我要查哪个商品：把商品名或编号发我（例如「oppo12」或「222:ij-555」），我帮你查价格、库存和在售状态。",
+      "intent": "GOODS_QUERY"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "怎么看我上架的商品",
+    "run": 3,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 1792,
+    "traceId": "23e8434c-41e1-4748-ae08-58cb84184469",
+    "trace": {
+      "traceId": "23e8434c-41e1-4748-ae08-58cb84184469",
+      "intent": "GOODS_QUERY",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "none",
+      "toolName": "query_goods",
+      "toolSuccess": "true",
+      "totalLatencyMs": "1788",
+      "finalBranch": "tool:query_goods",
+      "degradeReason": "none"
+    },
+    "trace_line": "2026-10-24 14:11:26.667  INFO 87500 --- [http-nio-8088-exec-6] [23e8434c-41e1-4748-ae08-58cb84184469] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=23e8434c-41e1-4748-ae08-58cb84184469 intent=GOODS_QUERY semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=none toolName=query_goods toolSuccess=true totalLatencyMs=1788 finalBranch=tool:query_goods degradeReason=none",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "怎么开店"
+      ],
+      "reply": "请告诉我要查哪个商品：把商品名或编号发我（例如「oppo12」或「222:ij-555」），我帮你查价格、库存和在售状态。",
+      "intent": "GOODS_QUERY"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "怎么前往商家工作台",
+    "run": 1,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 2651,
+    "traceId": "ea7dc686-ab1b-4d67-bf53-552d6e299e37",
+    "trace": {
+      "traceId": "ea7dc686-ab1b-4d67-bf53-552d6e299e37",
+      "intent": "GUIDE_NAVIGATION",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "none",
+      "toolName": "navigate",
+      "toolSuccess": "true",
+      "totalLatencyMs": "2648",
+      "finalBranch": "tool:navigate",
+      "degradeReason": "none"
+    },
+    "trace_line": "2026-10-24 14:11:29.576  INFO 87500 --- [http-nio-8088-exec-8] [ea7dc686-ab1b-4d67-bf53-552d6e299e37] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=ea7dc686-ab1b-4d67-bf53-552d6e299e37 intent=GUIDE_NAVIGATION semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=none toolName=navigate toolSuccess=true totalLatencyMs=2648 finalBranch=tool:navigate degradeReason=none",
+    "body": {
+      "success": true,
+      "action": {
+        "type": "tour",
+        "targetPath": "/merchant/after-sales",
+        "targetLabel": "售后工作台",
+        "label": "开始引导"
+      },
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "intent": "GUIDE_NAVIGATION"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "怎么前往商家工作台",
+    "run": 2,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 3027,
+    "traceId": "5528a553-63d4-47be-853c-74d3e4c6969f",
+    "trace": {
+      "traceId": "5528a553-63d4-47be-853c-74d3e4c6969f",
+      "intent": "UNKNOWN",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "-",
+      "toolSuccess": "-",
+      "totalLatencyMs": "3021",
+      "finalBranch": "switch:UNKNOWN",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:11:32.859  INFO 87500 --- [http-nio-8088-exec-7] [5528a553-63d4-47be-853c-74d3e4c6969f] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=5528a553-63d4-47be-853c-74d3e4c6969f intent=UNKNOWN semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=- toolSuccess=- totalLatencyMs=3021 finalBranch=switch:UNKNOWN degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。",
+      "intent": "UNKNOWN"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "怎么前往商家工作台",
+    "run": 3,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 3015,
+    "traceId": "081f7fb2-8b09-4206-b2fc-db29f985c200",
+    "trace": {
+      "traceId": "081f7fb2-8b09-4206-b2fc-db29f985c200",
+      "intent": "UNKNOWN",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "-",
+      "toolSuccess": "-",
+      "totalLatencyMs": "3009",
+      "finalBranch": "switch:UNKNOWN",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:11:36.140  INFO 87500 --- [http-nio-8088-exec-9] [081f7fb2-8b09-4206-b2fc-db29f985c200] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=081f7fb2-8b09-4206-b2fc-db29f985c200 intent=UNKNOWN semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=- toolSuccess=- totalLatencyMs=3009 finalBranch=switch:UNKNOWN degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。",
+      "intent": "UNKNOWN"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "我花出去的钱去哪了",
+    "run": 1,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 3018,
+    "traceId": "4867d853-9b16-40c8-95f1-904c55eaedb2",
+    "trace": {
+      "traceId": "4867d853-9b16-40c8-95f1-904c55eaedb2",
+      "intent": "UNKNOWN",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "-",
+      "toolSuccess": "-",
+      "totalLatencyMs": "3015",
+      "finalBranch": "switch:UNKNOWN",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:11:39.416  INFO 87500 --- [http-nio-8088-exec-10] [4867d853-9b16-40c8-95f1-904c55eaedb2] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=4867d853-9b16-40c8-95f1-904c55eaedb2 intent=UNKNOWN semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=- toolSuccess=- totalLatencyMs=3015 finalBranch=switch:UNKNOWN degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。",
+      "intent": "UNKNOWN"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "我花出去的钱去哪了",
+    "run": 2,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 3017,
+    "traceId": "b0a4426b-0f69-4bad-bd88-f5d830ce7c04",
+    "trace": {
+      "traceId": "b0a4426b-0f69-4bad-bd88-f5d830ce7c04",
+      "intent": "UNKNOWN",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "-",
+      "toolSuccess": "-",
+      "totalLatencyMs": "3012",
+      "finalBranch": "switch:UNKNOWN",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:11:42.686  INFO 87500 --- [http-nio-8088-exec-5] [b0a4426b-0f69-4bad-bd88-f5d830ce7c04] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=b0a4426b-0f69-4bad-bd88-f5d830ce7c04 intent=UNKNOWN semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=- toolSuccess=- totalLatencyMs=3012 finalBranch=switch:UNKNOWN degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。",
+      "intent": "UNKNOWN"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "我花出去的钱去哪了",
+    "run": 3,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 3020,
+    "traceId": "721c9bde-09e5-49b1-8428-da39a3e82092",
+    "trace": {
+      "traceId": "721c9bde-09e5-49b1-8428-da39a3e82092",
+      "intent": "UNKNOWN",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "-",
+      "toolSuccess": "-",
+      "totalLatencyMs": "3016",
+      "finalBranch": "switch:UNKNOWN",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:11:45.970  INFO 87500 --- [http-nio-8088-exec-1] [721c9bde-09e5-49b1-8428-da39a3e82092] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=721c9bde-09e5-49b1-8428-da39a3e82092 intent=UNKNOWN semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=- toolSuccess=- totalLatencyMs=3016 finalBranch=switch:UNKNOWN degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。",
+      "intent": "UNKNOWN"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "今天天气不错",
+    "run": 1,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 3015,
+    "traceId": "94f8d19e-a978-4045-b292-0c4265898bfa",
+    "trace": {
+      "traceId": "94f8d19e-a978-4045-b292-0c4265898bfa",
+      "intent": "UNKNOWN",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "-",
+      "toolSuccess": "-",
+      "totalLatencyMs": "3011",
+      "finalBranch": "switch:UNKNOWN",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:11:49.237  INFO 87500 --- [http-nio-8088-exec-2] [94f8d19e-a978-4045-b292-0c4265898bfa] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=94f8d19e-a978-4045-b292-0c4265898bfa intent=UNKNOWN semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=- toolSuccess=- totalLatencyMs=3011 finalBranch=switch:UNKNOWN degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。",
+      "intent": "UNKNOWN"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "今天天气不错",
+    "run": 2,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 1876,
+    "traceId": "dc340e13-b4c2-4d2d-93d7-86dbbece3dbc",
+    "trace": {
+      "traceId": "dc340e13-b4c2-4d2d-93d7-86dbbece3dbc",
+      "intent": "FAQ",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "none",
+      "toolName": "-",
+      "toolSuccess": "-",
+      "totalLatencyMs": "1871",
+      "finalBranch": "switch:FAQ",
+      "degradeReason": "none"
+    },
+    "trace_line": "2026-10-24 14:11:51.367  INFO 87500 --- [http-nio-8088-exec-3] [dc340e13-b4c2-4d2d-93d7-86dbbece3dbc] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=dc340e13-b4c2-4d2d-93d7-86dbbece3dbc intent=FAQ semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=none toolName=- toolSuccess=- totalLatencyMs=1871 finalBranch=switch:FAQ degradeReason=none",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "这类政策问题我还在学习中，建议联系店铺客服确认。",
+      "intent": "FAQ"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "今天天气不错",
+    "run": 3,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 3016,
+    "traceId": "8b9cc5d4-84af-4b7b-b374-5c7a808d0d4b",
+    "trace": {
+      "traceId": "8b9cc5d4-84af-4b7b-b374-5c7a808d0d4b",
+      "intent": "UNKNOWN",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "-",
+      "toolSuccess": "-",
+      "totalLatencyMs": "3013",
+      "finalBranch": "switch:UNKNOWN",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:11:54.644  INFO 87500 --- [http-nio-8088-exec-4] [8b9cc5d4-84af-4b7b-b374-5c7a808d0d4b] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=8b9cc5d4-84af-4b7b-b374-5c7a808d0d4b intent=UNKNOWN semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=- toolSuccess=- totalLatencyMs=3013 finalBranch=switch:UNKNOWN degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。",
+      "intent": "UNKNOWN"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "怎么处理退款",
+    "run": 1,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 3018,
+    "traceId": "d2120426-0c29-4afc-b786-0374a2fd5d77",
+    "trace": {
+      "traceId": "d2120426-0c29-4afc-b786-0374a2fd5d77",
+      "intent": "GUIDE_NAVIGATION",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "navigate",
+      "toolSuccess": "true",
+      "totalLatencyMs": "3016",
+      "finalBranch": "tool:navigate",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:11:57.921  INFO 87500 --- [http-nio-8088-exec-6] [d2120426-0c29-4afc-b786-0374a2fd5d77] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=d2120426-0c29-4afc-b786-0374a2fd5d77 intent=GUIDE_NAVIGATION semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=navigate toolSuccess=true totalLatencyMs=3016 finalBranch=tool:navigate degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "action": {
+        "type": "tour",
+        "targetPath": "/merchant/after-sales",
+        "targetLabel": "售后工作台",
+        "label": "开始引导"
+      },
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "intent": "GUIDE_NAVIGATION"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "怎么处理退款",
+    "run": 2,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 3012,
+    "traceId": "377b06cd-fff6-4984-a96a-81b845154dd8",
+    "trace": {
+      "traceId": "377b06cd-fff6-4984-a96a-81b845154dd8",
+      "intent": "GUIDE_NAVIGATION",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "navigate",
+      "toolSuccess": "true",
+      "totalLatencyMs": "3007",
+      "finalBranch": "tool:navigate",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:12:01.186  INFO 87500 --- [http-nio-8088-exec-8] [377b06cd-fff6-4984-a96a-81b845154dd8] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=377b06cd-fff6-4984-a96a-81b845154dd8 intent=GUIDE_NAVIGATION semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=navigate toolSuccess=true totalLatencyMs=3007 finalBranch=tool:navigate degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "action": {
+        "type": "tour",
+        "targetPath": "/merchant/after-sales",
+        "targetLabel": "售后工作台",
+        "label": "开始引导"
+      },
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "intent": "GUIDE_NAVIGATION"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "怎么处理退款",
+    "run": 3,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 3016,
+    "traceId": "69afa4db-cebe-4956-a2ac-667e25ee4913",
+    "trace": {
+      "traceId": "69afa4db-cebe-4956-a2ac-667e25ee4913",
+      "intent": "GUIDE_NAVIGATION",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "navigate",
+      "toolSuccess": "true",
+      "totalLatencyMs": "3011",
+      "finalBranch": "tool:navigate",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:12:04.460  INFO 87500 --- [http-nio-8088-exec-7] [69afa4db-cebe-4956-a2ac-667e25ee4913] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=69afa4db-cebe-4956-a2ac-667e25ee4913 intent=GUIDE_NAVIGATION semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=navigate toolSuccess=true totalLatencyMs=3011 finalBranch=tool:navigate degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "action": {
+        "type": "tour",
+        "targetPath": "/merchant/after-sales",
+        "targetLabel": "售后工作台",
+        "label": "开始引导"
+      },
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "intent": "GUIDE_NAVIGATION"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "我的退款进度",
+    "run": 1,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 5821,
+    "traceId": "eedc4508-3c83-4c87-8c9a-c094077a88d0",
+    "trace": {
+      "traceId": "eedc4508-3c83-4c87-8c9a-c094077a88d0",
+      "intent": "REFUND_QUERY",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "none",
+      "toolName": "merchant_refunds",
+      "toolSuccess": "true",
+      "totalLatencyMs": "5821",
+      "finalBranch": "tool:merchant_refunds",
+      "degradeReason": "none"
+    },
+    "trace_line": "2026-10-24 14:12:10.538  INFO 87500 --- [http-nio-8088-exec-9] [eedc4508-3c83-4c87-8c9a-c094077a88d0] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=eedc4508-3c83-4c87-8c9a-c094077a88d0 intent=REFUND_QUERY semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=none toolName=merchant_refunds toolSuccess=true totalLatencyMs=5821 finalBranch=tool:merchant_refunds degradeReason=none",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "怎么开店"
+      ],
+      "reply": "你店铺目前没有售后记录。",
+      "intent": "REFUND_QUERY"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "我的退款进度",
+    "run": 2,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 4015,
+    "traceId": "708246ae-5354-45c7-a29c-76183ae85be2",
+    "trace": {
+      "traceId": "708246ae-5354-45c7-a29c-76183ae85be2",
+      "intent": "REFUND_QUERY",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "merchant_refunds",
+      "toolSuccess": "true",
+      "totalLatencyMs": "4010",
+      "finalBranch": "tool:merchant_refunds",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:12:14.804  INFO 87500 --- [http-nio-8088-exec-10] [708246ae-5354-45c7-a29c-76183ae85be2] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=708246ae-5354-45c7-a29c-76183ae85be2 intent=REFUND_QUERY semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=merchant_refunds toolSuccess=true totalLatencyMs=4010 finalBranch=tool:merchant_refunds degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "怎么开店"
+      ],
+      "reply": "您好，关于您的退款进度，目前暂时没有售后记录哦。",
+      "intent": "REFUND_QUERY"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "我的退款进度",
+    "run": 3,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 4416,
+    "traceId": "121f50cd-8d8f-45bc-bbd5-ec4debe83db7",
+    "trace": {
+      "traceId": "121f50cd-8d8f-45bc-bbd5-ec4debe83db7",
+      "intent": "REFUND_QUERY",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "merchant_refunds",
+      "toolSuccess": "true",
+      "totalLatencyMs": "4408",
+      "finalBranch": "tool:merchant_refunds",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:12:19.479  INFO 87500 --- [http-nio-8088-exec-5] [121f50cd-8d8f-45bc-bbd5-ec4debe83db7] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=121f50cd-8d8f-45bc-bbd5-ec4debe83db7 intent=REFUND_QUERY semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=merchant_refunds toolSuccess=true totalLatencyMs=4408 finalBranch=tool:merchant_refunds degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "怎么开店"
+      ],
+      "reply": "您好，您的退款申请目前还没有记录哦。",
+      "intent": "REFUND_QUERY"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "直接带我去管理商品",
+    "run": 1,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 3009,
+    "traceId": "fb1fc934-5981-4a2a-9bfe-d83a4bd942e3",
+    "trace": {
+      "traceId": "fb1fc934-5981-4a2a-9bfe-d83a4bd942e3",
+      "intent": "UNKNOWN",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "-",
+      "toolSuccess": "-",
+      "totalLatencyMs": "3004",
+      "finalBranch": "switch:UNKNOWN",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:12:22.751  INFO 87500 --- [http-nio-8088-exec-2] [fb1fc934-5981-4a2a-9bfe-d83a4bd942e3] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=fb1fc934-5981-4a2a-9bfe-d83a4bd942e3 intent=UNKNOWN semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=- toolSuccess=- totalLatencyMs=3004 finalBranch=switch:UNKNOWN degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。",
+      "intent": "UNKNOWN"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "直接带我去管理商品",
+    "run": 2,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 3014,
+    "traceId": "8a925efe-d270-42f3-89cc-da0a434f76b5",
+    "trace": {
+      "traceId": "8a925efe-d270-42f3-89cc-da0a434f76b5",
+      "intent": "UNKNOWN",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "-",
+      "toolSuccess": "-",
+      "totalLatencyMs": "3011",
+      "finalBranch": "switch:UNKNOWN",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:12:26.020  INFO 87500 --- [http-nio-8088-exec-3] [8a925efe-d270-42f3-89cc-da0a434f76b5] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=8a925efe-d270-42f3-89cc-da0a434f76b5 intent=UNKNOWN semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=- toolSuccess=- totalLatencyMs=3011 finalBranch=switch:UNKNOWN degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。",
+      "intent": "UNKNOWN"
+    }
+  },
+  {
+    "group": "B",
+    "sentence": "直接带我去管理商品",
+    "run": 3,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 3013,
+    "traceId": "2cc60aa7-bd29-4957-b423-065470053010",
+    "trace": {
+      "traceId": "2cc60aa7-bd29-4957-b423-065470053010",
+      "intent": "UNKNOWN",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "-",
+      "toolSuccess": "-",
+      "totalLatencyMs": "3010",
+      "finalBranch": "switch:UNKNOWN",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:12:29.286  INFO 87500 --- [http-nio-8088-exec-4] [2cc60aa7-bd29-4957-b423-065470053010] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=2cc60aa7-bd29-4957-b423-065470053010 intent=UNKNOWN semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=- toolSuccess=- totalLatencyMs=3010 finalBranch=switch:UNKNOWN degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。",
+      "intent": "UNKNOWN"
+    }
+  },
+  {
+    "group": "C",
+    "label": "FAQ-policy-return",
+    "sentence": "拆封了能退货吗",
+    "run": 1,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 2,
+    "traceId": "0e3a58dd-6fa6-4849-9928-0f6ad6639fb1",
+    "trace": {
+      "traceId": "0e3a58dd-6fa6-4849-9928-0f6ad6639fb1",
+      "intent": "FAQ",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "false",
+      "llmFallback": "policy_faq",
+      "toolName": "-",
+      "toolSuccess": "-",
+      "totalLatencyMs": "0",
+      "finalBranch": "switch:FAQ",
+      "degradeReason": "none"
+    },
+    "trace_line": "2026-10-24 14:12:29.555  INFO 87500 --- [http-nio-8088-exec-6] [0e3a58dd-6fa6-4849-9928-0f6ad6639fb1] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=0e3a58dd-6fa6-4849-9928-0f6ad6639fb1 intent=FAQ semanticScore=- secondScore=- semanticConfident=- llmUsed=false llmFallback=policy_faq toolName=- toolSuccess=- totalLatencyMs=0 finalBranch=switch:FAQ degradeReason=none",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "支持7天无理由，但需保证不影响二次销售哦。",
+      "intent": "FAQ"
+    }
+  },
+  {
+    "group": "C",
+    "label": "FAQ-policy-shipping",
+    "sentence": "运费怎么算",
+    "run": 1,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 6,
+    "traceId": "1a476248-4da0-4e6b-90c0-690bb187e3e0",
+    "trace": {
+      "traceId": "1a476248-4da0-4e6b-90c0-690bb187e3e0",
+      "intent": "FAQ",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "false",
+      "llmFallback": "policy_faq",
+      "toolName": "-",
+      "toolSuccess": "-",
+      "totalLatencyMs": "0",
+      "finalBranch": "switch:FAQ",
+      "degradeReason": "none"
+    },
+    "trace_line": "2026-10-24 14:12:29.555  INFO 87500 --- [http-nio-8088-exec-8] [1a476248-4da0-4e6b-90c0-690bb187e3e0] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=1a476248-4da0-4e6b-90c0-690bb187e3e0 intent=FAQ semanticScore=- secondScore=- semanticConfident=- llmUsed=false llmFallback=policy_faq toolName=- toolSuccess=- totalLatencyMs=0 finalBranch=switch:FAQ degradeReason=none",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "本店满99包邮，偏远地区除外。",
+      "intent": "FAQ"
+    }
+  },
+  {
+    "group": "C",
+    "label": "GREETING",
+    "sentence": "你好",
+    "run": 1,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 3014,
+    "traceId": "53c48ffe-985a-4a0c-9626-243e928e6262",
+    "trace": {
+      "traceId": "53c48ffe-985a-4a0c-9626-243e928e6262",
+      "intent": "GREETING",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "-",
+      "toolSuccess": "-",
+      "totalLatencyMs": "3009",
+      "finalBranch": "switch:GREETING",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:12:32.574  INFO 87500 --- [http-nio-8088-exec-7] [53c48ffe-985a-4a0c-9626-243e928e6262] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=53c48ffe-985a-4a0c-9626-243e928e6262 intent=GREETING semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=- toolSuccess=- totalLatencyMs=3009 finalBranch=switch:GREETING degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "你好呀～我可以帮你查订单、查售后进度，也能一键带你去开店。",
+      "intent": "GREETING"
+    }
+  },
+  {
+    "group": "C",
+    "label": "ORDER_QUERY",
+    "sentence": "查我的订单",
+    "run": 1,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 6039,
+    "traceId": "3ca7d4d5-a7cd-46ff-a39f-4b684581aa54",
+    "trace": {
+      "traceId": "3ca7d4d5-a7cd-46ff-a39f-4b684581aa54",
+      "intent": "ORDER_QUERY",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "merchant_orders",
+      "toolSuccess": "true",
+      "totalLatencyMs": "6032",
+      "finalBranch": "tool:merchant_orders",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:12:38.612  INFO 87500 --- [http-nio-8088-exec-9] [3ca7d4d5-a7cd-46ff-a39f-4b684581aa54] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=3ca7d4d5-a7cd-46ff-a39f-4b684581aa54 intent=ORDER_QUERY semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=merchant_orders toolSuccess=true totalLatencyMs=6032 finalBranch=tool:merchant_orders degradeReason=llm_failed",
+    "body": {
+      "data": {
+        "total": 8,
+        "orders": [
+          {
+            "orderId": "DRILL-TEST-1792331236",
+            "product": "drill",
+            "quantity": 1,
+            "amount": 10.0,
+            "state": "CANCELLED",
+            "stateLabel": "已取消",
+            "createTime": "2026-10-18 13:47:16",
+            "cancelled": true
+          },
+          {
+            "orderId": "QLLE59424249",
+            "product": "oppo12",
+            "quantity": 2,
+            "amount": 4376.0,
+            "state": "CANCELLED",
+            "stateLabel": "已取消",
+            "createTime": "2026-10-12 10:22:28",
+            "cancelled": true
+          },
+          {
+            "orderId": "STLL57875548",
+            "product": "oppo12",
+            "quantity": 1,
+            "amount": 1888.0,
+            "state": "PAID",
+            "stateLabel": "已付款（待发货）",
+            "createTime": "2026-10-12 10:21:57",
+            "cancelled": false
+          }
+        ]
+      },
+      "success": true,
+      "suggestions": [
+        {
+          "label": "查看全部订单",
+          "routeKey": "orders"
+        },
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "你店铺最近有 8 笔订单，最新一笔是「drill（单号 DRILL-TEST-1792331236），实付 ¥10.00，下单时间 2026-10-18 13:47:16」。当前状态：已取消。",
+      "intent": "ORDER_QUERY"
+    }
+  },
+  {
+    "group": "C",
+    "label": "COMMENT_QUERY",
+    "sentence": "我要看评论",
+    "run": 1,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 6024,
+    "traceId": "de5b273e-1ab2-43ff-aa69-8d5cadd4a79f",
+    "trace": {
+      "traceId": "de5b273e-1ab2-43ff-aa69-8d5cadd4a79f",
+      "intent": "COMMENT_QUERY",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "merchant_comments",
+      "toolSuccess": "true",
+      "totalLatencyMs": "6017",
+      "finalBranch": "tool:merchant_comments",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:12:44.635  INFO 87500 --- [http-nio-8088-exec-10] [de5b273e-1ab2-43ff-aa69-8d5cadd4a79f] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=de5b273e-1ab2-43ff-aa69-8d5cadd4a79f intent=COMMENT_QUERY semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=merchant_comments toolSuccess=true totalLatencyMs=6017 finalBranch=tool:merchant_comments degradeReason=llm_failed",
+    "body": {
+      "data": {
+        "scope": "merchant",
+        "total": 0,
+        "unanswered": 0,
+        "comments": []
+      },
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "您店铺的商品目前还没有收到评论或提问。买家确认收货后可以在商品详情里评价。",
+      "intent": "COMMENT_QUERY"
+    }
+  },
+  {
+    "group": "C",
+    "label": "GOODS_QUERY",
+    "sentence": "222:ij-555",
+    "run": 1,
+    "role": 2,
+    "http": 200,
+    "elapsed_ms": 2003,
+    "traceId": "1ca8f437-1b0c-464d-b489-259931eb3dd3",
+    "trace": {
+      "traceId": "1ca8f437-1b0c-464d-b489-259931eb3dd3",
+      "intent": "GOODS_QUERY",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "none",
+      "toolName": "query_goods",
+      "toolSuccess": "true",
+      "totalLatencyMs": "2001",
+      "finalBranch": "tool:query_goods",
+      "degradeReason": "none"
+    },
+    "trace_line": "2026-10-24 14:12:46.640  INFO 87500 --- [http-nio-8088-exec-1] [1ca8f437-1b0c-464d-b489-259931eb3dd3] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=1ca8f437-1b0c-464d-b489-259931eb3dd3 intent=GOODS_QUERY semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=none toolName=query_goods toolSuccess=true totalLatencyMs=2001 finalBranch=tool:query_goods degradeReason=none",
+    "body": {
+      "data": {
+        "keyword": "222:ij-555",
+        "found": false,
+        "total": 0
+      },
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "怎么开店"
+      ],
+      "reply": "未找到商品「222:ij-555」。请核对商品名或编号后重试，也可以到商城搜索页按关键词搜索。",
+      "intent": "GOODS_QUERY"
+    }
+  },
+  {
+    "group": "C",
+    "sentence": "我的退款进度",
+    "run": 1,
+    "role": 1,
+    "http": 200,
+    "elapsed_ms": 5640,
+    "traceId": "54d99b7a-2026-47bd-a2eb-5c4af527ed09",
+    "trace": {
+      "traceId": "54d99b7a-2026-47bd-a2eb-5c4af527ed09",
+      "intent": "REFUND_QUERY",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "buyer_refunds",
+      "toolSuccess": "true",
+      "totalLatencyMs": "5632",
+      "finalBranch": "tool:buyer_refunds",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:12:52.280  INFO 87500 --- [http-nio-8088-exec-5] [54d99b7a-2026-47bd-a2eb-5c4af527ed09] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=54d99b7a-2026-47bd-a2eb-5c4af527ed09 intent=REFUND_QUERY semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=buyer_refunds toolSuccess=true totalLatencyMs=5632 finalBranch=tool:buyer_refunds degradeReason=llm_failed",
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "怎么开店"
+      ],
+      "reply": "您好，根据我们的系统记录，您目前没有售后退款记录哦。",
+      "intent": "REFUND_QUERY"
+    }
+  },
+  {
+    "group": "C",
+    "sentence": "查我的订单",
+    "run": 1,
+    "role": 1,
+    "http": 200,
+    "elapsed_ms": 6036,
+    "traceId": "f5d74b8c-40e8-4656-a011-e1d33e4e817c",
+    "trace": {
+      "traceId": "f5d74b8c-40e8-4656-a011-e1d33e4e817c",
+      "intent": "ORDER_QUERY",
+      "semanticScore": "-",
+      "secondScore": "-",
+      "semanticConfident": "-",
+      "llmUsed": "true",
+      "llmFallback": "llm_error:LlmException",
+      "toolName": "buyer_orders",
+      "toolSuccess": "true",
+      "totalLatencyMs": "6029",
+      "finalBranch": "tool:buyer_orders",
+      "degradeReason": "llm_failed"
+    },
+    "trace_line": "2026-10-24 14:12:58.318  INFO 87500 --- [http-nio-8088-exec-2] [f5d74b8c-40e8-4656-a011-e1d33e4e817c] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=f5d74b8c-40e8-4656-a011-e1d33e4e817c intent=ORDER_QUERY semanticScore=- secondScore=- semanticConfident=- llmUsed=true llmFallback=llm_error:LlmException toolName=buyer_orders toolSuccess=true totalLatencyMs=6029 finalBranch=tool:buyer_orders degradeReason=llm_failed",
+    "body": {
+      "data": {
+        "total": 3708,
+        "orders": [
+          {
+            "orderId": "BROR943184306407",
+            "product": "Draft-B7-Demo",
+            "quantity": 2,
+            "amount": 155.83999633789062,
+            "state": "CANCELLED",
+            "stateLabel": "已取消",
+            "createTime": "2026-10-20 21:18:47",
+            "cancelled": true
+          },
+          {
+            "orderId": "SIM-BURST-70862-1328",
+            "product": "27 英寸 2K 显示器 锐视 S27",
+            "quantity": 1,
+            "amount": 1013.219970703125,
+            "state": "CANCELLED",
+            "stateLabel": "已取消",
+            "createTime": "2026-10-20 21:07:10",
+            "cancelled": true
+          },
+          {
+            "orderId": "SIM-BURST-70862-1327",
+            "product": "机械键盘 87 键 茶轴",
+            "quantity": 1,
+            "amount": 256.6199951171875,
+            "state": "CANCELLED",
+            "stateLabel": "已取消",
+            "createTime": "2026-10-20 21:07:10",
+            "cancelled": true
+          }
+        ]
+      },
+      "success": true,
+      "suggestions": [
+        {
+          "label": "查看全部订单",
+          "routeKey": "orders"
+        },
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "你最近有 3708 笔订单，最新一笔是「Draft-B7-Demo（单号 BROR943184306407），实付 ¥155.84，下单时间 2026-10-20 21:18:47」。当前状态：已取消。",
+      "intent": "ORDER_QUERY"
+    }
+  }
+]

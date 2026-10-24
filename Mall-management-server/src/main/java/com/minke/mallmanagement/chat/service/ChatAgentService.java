@@ -133,6 +133,9 @@ public class ChatAgentService {
      */
     private static final Pattern AFTER_SALES = Pattern.compile("退款|退货|售后");
 
+    /** 问发货 / 物流：最新一笔恰好已取消时，必须说明「没有物流」，不能只报状态。 */
+    private static final Pattern SHIPPING_ASK = Pattern.compile("发货|物流|快递|到哪|卡在|什么时候到");
+
     private final OrderDao orderDao;
     private final OrderRefundService refundService;
     private final OrderStateMachine orderStateMachine;
@@ -303,6 +306,11 @@ public class ChatAgentService {
                     decision.needPublish(), isDirectNavigation(normalized));
             case CLARIFY -> answerClarify(role, userId, message);
             case IDENTITY_CLAIM -> answerIdentityClaim(message, userId, role);
+            case BOT_IDENTITY -> answerSmallTalk(intent,
+                    "我是米可小助手，商城的智能客服，不是 GPT 之类的通用模型。"
+                            + "我可以帮你查订单、售后，或带你去搜索商品。");
+            case OUT_OF_SCOPE -> answerSmallTalk(intent,
+                    "这个我帮不上忙～我是商城的智能客服，可以帮你查订单、售后，或者搜索商品。");
             case GREETING -> answerSmallTalk(intent,
                     "你好呀～我可以帮你查订单、查售后进度，也能一键带你去开店。");
             case HELP -> answerSmallTalk(intent,
@@ -484,6 +492,14 @@ public class ChatAgentService {
         if (faq != null && faq.policy()) {
             trace.llmFallback = "policy_faq";
             return new Decision(ChatIntent.FAQ, null, false, null);
+        }
+
+        // 对抗性压测的确定性闸（2026-10-24）：问身份、讲笑话 / 写代码、查消费 / 营业额、
+        // 优惠券。这几类必须在语义 / 大模型之前判死，否则小模型会把它们吸到商品搜索。
+        Decision business = businessRuleDecision(normalized, role, isDirectNavigation(normalized));
+        if (business != null) {
+            trace.llmFallback = "business_rule";
+            return business;
         }
 
         // 语义路由优先（2026-10-22）：标准问法在启动时已向量化，这里只算余弦。
@@ -715,6 +731,37 @@ public class ChatAgentService {
     }
 
     /**
+     * 对抗性压测的确定性业务闸（2026-10-24）。
+     *
+     * <p>只拦「业务边界清楚、但小模型容易吸到商品搜索」的四类：
+     * ① 问客服身份；② 讲笑话 / 写代码；③ 查消费 / 商家营业额；④ 优惠券。
+     * 其余仍走语义 / 模型，避免把正常说法判死。
+     */
+    private static Decision businessRuleDecision(String normalized, Integer role, boolean direct) {
+        if (ChatIntentRecognizer.looksLikeBotIdentity(normalized)) {
+            return new Decision(ChatIntent.BOT_IDENTITY, null, false, null);
+        }
+        if (ChatIntentRecognizer.looksLikeOutOfScope(normalized)) {
+            return new Decision(ChatIntent.OUT_OF_SCOPE, null, false, null);
+        }
+        if (ChatIntentRecognizer.looksLikeSpending(normalized)) {
+            return new Decision(ChatIntent.ASSET_QUERY, null, false, memberPath(role));
+        }
+        if (isMerchant(role) && ChatIntentRecognizer.looksLikeMerchantRevenue(normalized)) {
+            return navDecision("/merchant/stats", direct);
+        }
+        if (ChatIntentRecognizer.looksLikeCoupon(normalized)) {
+            return navDecision(memberPath(role), direct);
+        }
+        return null;
+    }
+
+    /** 会员中心（优惠券 / 余额 / 流水）在两个壳里的真实路径。 */
+    private static String memberPath(Integer role) {
+        return isMerchant(role) ? "/merchant/user/member" : "/customer/user/member";
+    }
+
+    /**
      * 语义相似度低时的 **LLM 二次判定**（2026-10-24）。
      *
      * <p>只有确定性命中不了才走到这里；模型给 UNKNOWN / CLARIFY 或超时 / 异常 ⇒ 返回
@@ -824,6 +871,12 @@ public class ChatAgentService {
         ChatIntent intent = match.intent();
         String orderId = match.orderId();
         boolean direct = isDirectNavigation(normalized);
+
+        // 与 decide() 同一道确定性闸：模型不可用时也不能把身份 / 代码 / 消费问题答错。
+        Decision business = businessRuleDecision(normalized, role, direct);
+        if (business != null) {
+            return business;
+        }
 
         // 「怎么处理退款」这类「去哪办」的句子，规则引擎只看得见「退款」两个字。
         // 与 decide() 里的字典纠偏同一条判据（在问自己那笔状态时不动），
@@ -1233,6 +1286,12 @@ public class ChatAgentService {
         }
         String[] state = stateOf(picked);
         text.append("当前状态：").append(state[1]).append("。");
+        if ("CANCELLED".equals(state[0])
+                && SHIPPING_ASK.matcher(ChatIntentRecognizer.normalize(question)).find()) {
+            // 用户问「发货没 / 快递卡在哪」，最新一笔却是已取消 —— 直说没有物流，
+            // 并请他补另一笔的单号，避免把「已取消」当成「运输中」答非所问。
+            text.append("这笔订单已取消，没有发货和物流记录；如果你问的是另一笔，请把单号发我。");
+        }
 
         List<Map<String, Object>> summaries = new ArrayList<>();
         if (!isBlank(wantedOrderId) && !idMiss) {
@@ -1328,6 +1387,8 @@ public class ChatAgentService {
             return notLoggedIn(ChatIntent.REFUND_QUERY);
         }
         boolean merchant = isMerchant(role);
+        boolean upset = !merchant && ChatIntentRecognizer.looksUpset(
+                ChatIntentRecognizer.normalize(question));
         Map<String, Object> result = merchant
                 ? refundService.merchantRefunds(userId, null, 1)
                 : refundService.myRefunds(userId, 1);
@@ -1338,9 +1399,9 @@ public class ChatAgentService {
                     ? "你店铺目前没有售后记录。"
                     : "你最近没有售后记录。已收货的订单可在「历史订单」页发起售后；也可以问「查我的订单」。";
             return reply(ChatIntent.REFUND_QUERY,
-                    composeOrFallback(question, ChatIntent.REFUND_QUERY,
-                            "身份：" + (merchant ? "商家" : "客户") + "\n售后记录数：0\n", text),
-                    null, null, refundSuggestions());
+                    withEmpathy(upset, composeOrFallback(question, ChatIntent.REFUND_QUERY,
+                            "身份：" + (merchant ? "商家" : "客户") + "\n售后记录数：0\n", text)),
+                    null, null, refundSuggestions(upset));
         }
 
         Map<String, Object> row = rows.get(0);
@@ -1405,13 +1466,31 @@ public class ChatAgentService {
                 + "处理人：" + (isBlank(handler) ? "—" : handler) + "\n"
                 + "处理时间：" + (isBlank(handledAt) ? "—" : handledAt) + "\n";
         return reply(ChatIntent.REFUND_QUERY,
-                composeOrFallback(question, ChatIntent.REFUND_QUERY, facts, text.toString()),
-                data, null, refundSuggestions());
+                withEmpathy(upset, composeOrFallback(question, ChatIntent.REFUND_QUERY,
+                        facts, text.toString())),
+                data, null, refundSuggestions(upset));
     }
 
-    private List<Object> refundSuggestions() {
+    /** 用户带情绪时先致歉；没有情绪词就不加，避免每条售后都像模板。 */
+    private static String withEmpathy(boolean upset, String text) {
+        if (!upset || text == null) {
+            return text;
+        }
+        // 话术生成模型自己已经先道歉了（2026-10-24 实测「实在抱歉让您久等了」），
+        // 再前缀一次会变成「非常抱歉…实在抱歉…」；开头已有歉意就只保留一份。
+        String head = text.length() <= 40 ? text : text.substring(0, 40);
+        if (head.contains("抱歉") || head.contains("久等")) {
+            return text;
+        }
+        return "非常抱歉让您久等了。" + text;
+    }
+
+    private List<Object> refundSuggestions(boolean upset) {
         List<Object> list = new ArrayList<>();
         list.add("查我的订单");
+        if (upset) {
+            list.add("联系人工客服");
+        }
         list.add("怎么开店");
         return list;
     }
@@ -1775,12 +1854,23 @@ public class ChatAgentService {
         String text;
         if (intent == ChatIntent.ASSET_QUERY) {
             text = direct
-                    ? "已为您准备好直达入口，点击即可前往会员中心查看钱包。"
-                    : "钱包余额和收支流水都在会员中心，我一步步带您过去。";
+                    ? "已为您准备好直达入口，点击即可前往「" + title + "」查看余额、优惠券和流水。"
+                    : "钱包余额、优惠券和收支流水都在「" + title + "」，我一步步带您过去。";
+        } else if (path.endsWith("/cart")) {
+            // 结算 / 删除购物车都是写操作：只带路，绝不替用户点。
+            text = direct
+                    ? "已为您准备好直达入口，结算和修改购物车需要您亲自确认。"
+                    : "结算和修改购物车需要您亲自在页面里确认，我不会替您操作。"
+                            + "点下面按钮，我带您去「" + title + "」。";
+        } else if (path.endsWith("/user/info")) {
+            text = direct
+                    ? "已为您准备好直达入口，地址和资料需要您亲自修改。"
+                    : "收货地址和账号资料在「" + title + "」里，需要您亲自修改。"
+                            + "点下面按钮，我带您过去。";
         } else {
             text = direct
-                    ? "已为您准备好直达入口，点击即可前往。"
-                    : "好的，我来一步步教您。点击下方按钮开始。";
+                    ? "已为您准备好直达入口，点击即可前往「" + title + "」。"
+                    : "好的，我带您去「" + title + "」，点下面按钮开始。";
         }
         return reply(intent, text, null, navAction(path, title, direct), defaultSuggestions());
     }
@@ -1965,7 +2055,11 @@ public class ChatAgentService {
                 || intent == ChatIntent.ADD_TO_SECKILL
                 || intent == ChatIntent.IDENTITY_CLAIM
                 // 连续澄清防复读：必须记住上一轮是 CLARIFY，否则第二轮永远看不到上下文。
-                || intent == ChatIntent.CLARIFY;
+                || intent == ChatIntent.CLARIFY
+                // 身份 / 越界请求也要落上下文：否则「CLARIFY → 讲笑话 → 乱码」会继承
+                // 更早的 CLARIFY，第一句乱码就被误判成「第二次」，两轮话术又变成复读。
+                || intent == ChatIntent.OUT_OF_SCOPE
+                || intent == ChatIntent.BOT_IDENTITY;
     }
 
     /** 从回复体里取「这一轮实际讲的订单号」，供下一句「到哪了」复用。 */

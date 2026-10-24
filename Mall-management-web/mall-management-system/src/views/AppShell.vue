@@ -630,7 +630,10 @@ padding: 40px 48px 78px;
    （探针实测 136px）—— 与 A 版窄屏形态不符。 */
 @media (max-width: 1280px) {
   .top-nav { padding: 0 28px; gap: 14px; }
-  .top-search { display: none; }
+  /* 2026-10-24 用户反馈「搜索框又不见了」：原稿在 ≤1280 直接 display:none，
+     而 861–1280 这一大段（含 1280 笔记本）顶栏仍放得下 210px 的搜索框。
+     ⇒ 只收内距，不再收起；≤860 仍走下面整行换行。 */
+  .top-search { min-width: 180px; }
 }
 @media (max-width: 860px) {
   .top-nav {
