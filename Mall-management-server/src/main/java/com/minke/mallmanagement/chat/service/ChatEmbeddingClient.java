@@ -20,20 +20,20 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 智谱 GLM Embedding 客户端（{@code /api/paas/v4/embeddings}）。
+ * SiliconFlow BAAI/bge-m3 Embedding 客户端（{@code /v1/embeddings}）。
  *
  * <h2>【边界】</h2>
  * 只负责「文本 → 向量」与失败分类，不知道任何意图。API Key 从配置 / 环境变量取；
  * 本类不打日志、不把 Authorization 写进异常消息。
  *
- * <p>GLM 单次 input 有上限（实测 32 条以上会被 400 拒），本类按 {@code batchSize}
- * 自动分批；返回按 {@code index} 排序，保证与入参逐条对齐。
+ * <p>单次 input 有上限，本类按 {@code batchSize} 自动分批；返回按 {@code index}
+ * 排序，保证与入参逐条对齐。向量维度不写死：bge-m3 为 1024 维，由首条向量自适应。
  */
 @Service
 public class ChatEmbeddingClient implements TextEmbedder {
 
-    static final String DEFAULT_URL = "https://open.bigmodel.cn/api/paas/v4/embeddings";
-    static final String DEFAULT_MODEL = "embedding-3";
+    static final String DEFAULT_URL = "https://api.siliconflow.cn/v1/embeddings";
+    static final String DEFAULT_MODEL = "BAAI/bge-m3";
     static final int DEFAULT_TIMEOUT_SECONDS = 8;
     static final int DEFAULT_BATCH_SIZE = 32;
 
@@ -49,10 +49,10 @@ public class ChatEmbeddingClient implements TextEmbedder {
     @Autowired
     public ChatEmbeddingClient(
             @Value("${chat.embedding.enabled:true}") boolean enabled,
-            @Value("${chat.embedding.url:https://open.bigmodel.cn/api/paas/v4/embeddings}") String url,
+            @Value("${chat.embedding.url:https://api.siliconflow.cn/v1/embeddings}") String url,
             @Value("${chat.embedding.api-key:}") String apiKey,
             @Value("${chat.llm.api-key:}") String llmApiKey,
-            @Value("${chat.embedding.model:embedding-3}") String model,
+            @Value("${chat.embedding.model:BAAI/bge-m3}") String model,
             @Value("${chat.embedding.timeout-seconds:8}") int timeoutSeconds,
             @Value("${chat.embedding.batch-size:32}") int batchSize,
             ObjectMapper objectMapper) {

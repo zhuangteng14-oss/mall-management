@@ -12,17 +12,22 @@ import com.minke.mallmanagement.order.RefundStatusText;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
 import com.minke.mallmanagement.order.refund.service.OrderRefundService;
+import com.minke.mallmanagement.shared.web.TraceIdFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.net.http.HttpConnectTimeoutException;
+import java.net.http.HttpTimeoutException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
@@ -45,6 +50,14 @@ import java.util.regex.Pattern;
 public class ChatAgentService {
 
     private static final Logger log = LoggerFactory.getLogger(ChatAgentService.class);
+
+    /**
+     * 结构化 Trace 日志的固定前缀（2026-10-24 只读统计用）。
+     *
+     * <p>⚠️ 只打一行 key=value 日志，**不接** OTel / Jaeger / Langfuse：本仓没有可观测性后端，
+     * 导出脚本按这个标记抓行即可。字段口径见 {@link Trace}。
+     */
+    static final String TRACE_MARKER = "CHAT_TRACE";
 
     private static final int MAX_MESSAGE_LEN = 200;
     private static final int RECENT_LIMIT = 3;
@@ -228,11 +241,30 @@ public class ChatAgentService {
      * @param currentPath 前端传的当前路由，只用于让大模型知道「用户站在哪」；不参与鉴权
      */
     public Map<String, Object> ask(String rawMessage, String userId, Integer role, String currentPath) {
+        // 结构化 Trace（2026-10-24）：无论正常返回、参数校验还是异常，finally 都打一行。
+        long startedAt = System.nanoTime();
+        Trace trace = new Trace(currentTraceId());
+        try {
+            return askTraced(rawMessage, userId, role, currentPath, trace);
+        } catch (RuntimeException e) {
+            if ("none".equals(trace.degradeReason)) {
+                trace.degradeReason = "exception:" + e.getClass().getSimpleName();
+            }
+            throw e;
+        } finally {
+            trace.log(startedAt);
+        }
+    }
+
+    private Map<String, Object> askTraced(String rawMessage, String userId, Integer role,
+                                          String currentPath, Trace trace) {
         if (rawMessage == null || rawMessage.trim().isEmpty()) {
+            trace.finalBranch = "validation";
             return fail("说点什么吧～");
         }
         String message = rawMessage.trim();
         if (message.length() > MAX_MESSAGE_LEN) {
+            trace.finalBranch = "validation";
             return fail("消息太长了，请控制在 " + MAX_MESSAGE_LEN + " 字以内");
         }
 
@@ -240,14 +272,14 @@ public class ChatAgentService {
         FaqKnowledgeBase.Answer faq = FaqKnowledgeBase.match(normalized);
 
         // 阶段一：LLM 优先；任何异常（含 3s 超时）都由 decide() 打 WARN 并降级规则引擎。
-        Decision decision = decide(message, normalized, faq, userId, role, currentPath);
+        Decision decision = decide(message, normalized, faq, userId, role, currentPath, trace);
         ChatIntent intent = decision.intent();
         String orderId = decision.orderId();
 
         // 插件化路径（2026-10-22）：先问注册表。模型给了 tool 就按名字调，
         // 没给就按意图找当前角色的内置工具；注册表没有对应工具（问候 / FAQ / 管理员）
         // 或执行失败 ⇒ 回退下面这张 switch（既有行为逐分支保留）。
-        Map<String, Object> viaTool = executeTool(decision, message, userId, role);
+        Map<String, Object> viaTool = executeTool(decision, message, userId, role, trace);
         Map<String, Object> resp = viaTool != null ? viaTool : switch (intent) {
             case ORDER_QUERY -> answerOrders(message, userId, role, orderId);
             case REFUND_QUERY -> answerRefund(message, userId, role);
@@ -279,7 +311,77 @@ public class ChatAgentService {
             default -> answerSmallTalk(ChatIntent.UNKNOWN,
                     "我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。");
         };
+        trace.finalIntent = intent.name();
+        if (viaTool != null) {
+            trace.finalBranch = "tool:" + (trace.toolName == null ? "intent" : trace.toolName);
+        } else if (trace.toolName != null) {
+            // 工具层尝试过但没给出可用结果 ⇒ 落回内置 switch，trace 里保留工具名便于对账。
+            trace.finalBranch = "fallback:" + intent.name();
+        } else {
+            trace.finalBranch = "switch:" + intent.name();
+        }
         return remember(userId, message, intent, orderIdOf(resp, orderId), resp);
+    }
+
+    /** 请求级 traceId：优先沿用 {@link TraceIdFilter} 写在 MDC 里的那个。 */
+    private static String currentTraceId() {
+        String id = MDC.get(TraceIdFilter.MDC_KEY);
+        return id == null || id.isBlank() ? UUID.randomUUID().toString() : id;
+    }
+
+    /**
+     * 一次问答的结构化 Trace（只读统计口径，2026-10-24）。
+     *
+     * <p>字段与用户的验收清单逐项对应；打一行 {@code CHAT_TRACE key=value …}，
+     * 空值写 {@code -}。**不记录用户原文**（避免把聊天内容写进日志）。
+     */
+    private static final class Trace {
+        final String traceId;
+        String finalIntent;
+        Double semanticScore;
+        Double secondScore;
+        Boolean semanticConfident;
+        boolean llmUsed;
+        String llmFallback = "not_reached";
+        /** LLM 出网单独耗时（毫秒）；未调用为 null。 */
+        Long llmLatencyMs;
+        /** none / connect_timeout / request_timeout / other / -（未调用）。 */
+        String llmTimeoutType = "-";
+        String toolName;
+        Boolean toolSuccess;
+        String finalBranch = "unknown";
+        String degradeReason = "none";
+
+        Trace(String traceId) {
+            this.traceId = traceId;
+        }
+
+        void log(long startedAtNanos) {
+            long totalLatencyMs = (System.nanoTime() - startedAtNanos) / 1_000_000L;
+            log.info("{} traceId={} intent={} semanticScore={} secondScore={} semanticConfident={} "
+                            + "llmUsed={} llmFallback={} llmLatencyMs={} llmTimeoutType={} "
+                            + "toolName={} toolSuccess={} totalLatencyMs={} "
+                            + "finalBranch={} degradeReason={}",
+                    TRACE_MARKER, traceId, dash(finalIntent), num(semanticScore), num(secondScore),
+                    bool(semanticConfident), llmUsed, llmFallback, milli(llmLatencyMs), llmTimeoutType,
+                    dash(toolName), bool(toolSuccess), totalLatencyMs, finalBranch, degradeReason);
+        }
+
+        private static String dash(String value) {
+            return value == null || value.isBlank() ? "-" : value;
+        }
+
+        private static String num(Double value) {
+            return value == null ? "-" : String.format(Locale.ROOT, "%.4f", value);
+        }
+
+        private static String milli(Long value) {
+            return value == null ? "-" : String.valueOf(value);
+        }
+
+        private static String bool(Boolean value) {
+            return value == null ? "-" : String.valueOf(value);
+        }
     }
 
     /**
@@ -291,7 +393,7 @@ public class ChatAgentService {
      * @return 响应体；注册表没装 / 没匹配到工具 / 执行失败 时返回 {@code null}，由调用方回退
      */
     private Map<String, Object> executeTool(Decision decision, String message,
-                                            String userId, Integer role) {
+                                            String userId, Integer role, Trace trace) {
         if (toolExecutor == null || toolRegistry == null) {
             return null;
         }
@@ -323,19 +425,39 @@ public class ChatAgentService {
         }
         ToolContext context = new ToolContext(userId, role, message);
         try {
+            Map<String, Object> out;
             if (!isBlank(decision.tool())) {
+                trace.toolName = decision.tool();
                 // 双保险：分类器已按角色校验过一次，这里再拒一次（工具名也可能来自规则层）。
                 if (!toolRegistry.allows(decision.tool(), role)) {
+                    trace.toolSuccess = false;
+                    trace.degradeReason = "tool_role_denied";
                     log.warn("工具 {} 不在角色 {} 的可用列表内，回退内置分支", decision.tool(), role);
                     return null;
                 }
-                return nonEmpty(toolExecutor.invoke(decision.tool(), context, args));
+                out = nonEmpty(toolExecutor.invoke(decision.tool(), context, args));
+            } else {
+                var tool = toolRegistry.forIntent(decision.intent(), role);
+                trace.toolName = tool == null ? null : tool.name();
+                if (tool == null) {
+                    // 当前意图没有挂工具（如 GOODS_MANAGE / 问候）⇒ 不算「工具失败」。
+                    return null;
+                }
+                out = nonEmpty(toolExecutor.invokeForIntent(decision.intent(), context, args));
             }
-            return nonEmpty(toolExecutor.invokeForIntent(decision.intent(), context, args));
+            trace.toolSuccess = out != null;
+            if (out == null) {
+                trace.degradeReason = "tool_empty";
+            }
+            return out;
         } catch (ToolRegistry.ToolException e) {
+            trace.toolSuccess = false;
+            trace.degradeReason = "tool_failed";
             log.warn("工具执行失败，回退内置分支：{}", e.getMessage());
             return null;
         } catch (RuntimeException e) {
+            trace.toolSuccess = false;
+            trace.degradeReason = "tool_exception";
             log.warn("工具执行异常，回退内置分支：{}: {}",
                     e.getClass().getSimpleName(), e.getMessage());
             return null;
@@ -349,33 +471,45 @@ public class ChatAgentService {
     /**
      * 双引擎路由：LLM 优先，规则兜底。
      *
-     * <p>LLM 返回 UNKNOWN 时再走一次规则引擎 —— Prompt 没列 GREETING / HELP /
-     * IDENTITY_CLAIM，这三类仍由规则识别；LLM 故障则整句交给规则引擎。
+     * <p>LLM 返回 UNKNOWN 时再走一次规则引擎 —— Prompt 没列 IDENTITY_CLAIM，
+     * 这类仍由规则识别；LLM 故障则整句交给规则引擎。
      */
     private Decision decide(String message, String normalized,
                             FaqKnowledgeBase.Answer faq, String userId,
-                            Integer role, String currentPath) {
+                            Integer role, String currentPath, Trace trace) {
         // 政策 FAQ 是本地确定性知识，先于任何模型 / 向量判断 ——
         // 「拆封了能退货吗」里有「退货」，不能被当成查售后进度。
         if (faq != null && faq.policy()) {
+            trace.llmFallback = "policy_faq";
             return new Decision(ChatIntent.FAQ, null, false, null);
         }
 
         // 语义路由优先（2026-10-22）：标准问法在启动时已向量化，这里只算余弦。
         // 低于阈值 ⇒ 不硬猜，澄清；语义层不可用 ⇒ 返回 null，继续走下面的 LLM / 规则。
-        SemanticRouter.Result semantic = semanticRoute(message, role);
+        SemanticRouter.Result semantic = semanticRoute(message, role, trace);
         if (semantic != null) {
+            trace.semanticScore = semantic.score();
+            trace.secondScore = semantic.secondScore();
+            trace.semanticConfident = semantic.confident();
             if (!semantic.confident()) {
+                trace.llmFallback = "semantic_not_confident";
                 Decision deterministic = deterministicFallback(message, normalized, faq, userId, role);
                 return deterministic != null ? deterministic
                         : new Decision(ChatIntent.CLARIFY, null, false, null);
             }
+            trace.llmFallback = "semantic_confident";
             return semanticDecision(semantic, message, normalized, userId);
         }
 
         if (llmClassifier != null && llmClassifier.isEnabled()) {
+            trace.llmUsed = true;
+            long llmStartedAt = System.nanoTime();
             try {
                 LlmIntentClassifier.Result result = llmClassifier.classify(message, role, currentPath);
+                trace.llmLatencyMs = (System.nanoTime() - llmStartedAt) / 1_000_000L;
+                trace.llmTimeoutType = "none";
+                // 模型已经给出分类 ⇒ 后续的确定性纠偏不再算「降级」。
+                trace.llmFallback = "none";
                 ChatIntent intent = result.intent();
                 boolean direct = isDirectNavigation(normalized);
                 // 旧协议 NAVIGATE / 新协议 GUIDE_NAVIGATION 都按「用户有没有明说直达」分流：
@@ -398,6 +532,7 @@ public class ChatAgentService {
                 // ⚠️ 只有「没选工具」的 UNKNOWN 才交给规则引擎。插件工具（intent=UNKNOWN）
                 // 是模型明确选了要调的方法 —— 送去规则引擎反而会把这次调用丢掉。
                 if (intent == ChatIntent.UNKNOWN && isBlank(tool)) {
+                    trace.llmFallback = "llm_unknown";
                     return byRules(message, normalized, faq, userId, role);
                 }
                 // 「我要看评论」：旧 Prompt 教模型导航到商品管理 / 我的订单，但那些页面都看不到评论。
@@ -453,21 +588,55 @@ public class ChatAgentService {
                         needPublish || (intent == ChatIntent.ADD_TO_SECKILL && declaresNotPublished(normalized)),
                         result.targetPath(), tool, toolArgs);
             } catch (RuntimeException e) {
+                if (trace.llmLatencyMs == null) {
+                    trace.llmLatencyMs = (System.nanoTime() - llmStartedAt) / 1_000_000L;
+                }
+                trace.llmTimeoutType = timeoutType(e);
+                trace.llmFallback = "llm_error:" + e.getClass().getSimpleName();
+                trace.degradeReason = "llm_failed";
                 log.warn("LLM 意图识别失败，降级规则引擎：{}: {}",
                         e.getClass().getSimpleName(), e.getMessage());
             }
+        } else {
+            trace.llmFallback = "llm_disabled";
         }
         return byRules(message, normalized, faq, userId, role);
     }
 
+    /**
+     * 诊断：把 LLM 失败的原因归到「连接阶段 / 响应阶段 / 其他」。
+     * {@code HttpConnectTimeoutException} 继承自 {@code HttpTimeoutException}，必须先判子类。
+     */
+    private static String timeoutType(Throwable error) {
+        for (Throwable t = error; t != null; t = t.getCause()) {
+            if (t instanceof HttpConnectTimeoutException) {
+                return "connect_timeout";
+            }
+            if (t instanceof HttpTimeoutException) {
+                return "request_timeout";
+            }
+        }
+        return "other";
+    }
+
     /** 语义层调用包一层 try：语义路由故障绝不能把聊天打成 500。 */
-    private SemanticRouter.Result semanticRoute(String message, Integer role) {
+    private SemanticRouter.Result semanticRoute(String message, Integer role, Trace trace) {
         if (semanticRouter == null) {
+            trace.llmFallback = "semantic_absent";
             return null;
         }
         try {
-            return semanticRouter.route(message, role);
+            // ⚠️ 不在这里先判 isEnabled()：{@code route()} 自己会判（单测也常直接 stub
+            // route() 而不 stub isEnabled()）。这里只记录「为什么没拿到结果」。
+            SemanticRouter.Result result = semanticRouter.route(message, role);
+            if (result == null) {
+                trace.llmFallback = semanticRouter.isEnabled()
+                        ? "semantic_unavailable" : "semantic_disabled";
+            }
+            return result;
         } catch (RuntimeException e) {
+            trace.llmFallback = "semantic_error:" + e.getClass().getSimpleName();
+            trace.degradeReason = "semantic_failed";
             log.warn("语义路由异常，降级到意图分类器：{}: {}",
                     e.getClass().getSimpleName(), e.getMessage());
             return null;

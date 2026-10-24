@@ -30,7 +30,7 @@ class SemanticRouterTest {
         SemanticRouteRegistry.SemanticRoute goods = first(ChatIntent.GOODS_MANAGE);
         assertThat(goods.targetPath()).isEqualTo("/merchant/user/list");
         assertThat(RouteCatalog.resolve(goods.targetPath(), 2)).isEqualTo("/merchant/user/list");
-        assertThat(first(ChatIntent.MERCHANT_DASHBOARD).targetPath()).isEqualTo("/merchant");
+        assertThat(first(ChatIntent.MERCHANT_DASHBOARD).targetPath()).isEqualTo("/merchant/user");
     }
 
     @Test

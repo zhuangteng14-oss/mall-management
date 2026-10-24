@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.chat.model.ChatIntent;
 import com.minke.mallmanagement.chat.tool.ToolDescriptor;
 import com.minke.mallmanagement.chat.tool.ToolRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -24,7 +26,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 大模型意图识别（阶段一）：把一句话交给 GLM-4-Flash，取回意图与槽位。
+ * 大模型意图识别（阶段一）：把一句话交给 DeepSeek-V4.1-Flash，取回意图与槽位。
  *
  * <h2>【边界】</h2>
  * 本类只做「分类 + 抽槽」，不查库、不拼业务话术；路由与降级在
@@ -32,7 +34,9 @@ import java.util.Set;
  * 不支持的意图都抛 {@link LlmException}，由编排层降级到规则引擎。
  *
  * <h2>【超时】</h2>
- * 连接超时与整次请求超时都是 {@value #TIMEOUT_SECONDS} 秒（用户要求的硬上限）。
+ * 连接超时与整次请求超时都是 {@value #TIMEOUT_SECONDS} 秒硬上限。
+ * 5 秒沿用切换前 GLM-4-Flash 的尾延迟实测（p95≈4.8s / p99≈5.7s）；DeepSeek
+ * 切换后需重测，但超时一律降级规则引擎，不会无限等待。
  * 同步 {@code send} 在调用线程执行，不额外占线程池。
  *
  * <h2>【保密】</h2>
@@ -41,12 +45,19 @@ import java.util.Set;
 @Service
 public class LlmIntentClassifier {
 
-    static final int TIMEOUT_SECONDS = 3;
+    /** 诊断行：单次出网的耗时 / 超时类型 / usage / 响应头 request-id。 */
+    static final String CALL_MARKER = "LLM_CALL";
+    /** 诊断行：System Prompt 的字符构成（基础规则 / 路由字典 / 工具目录 / 输出格式）。 */
+    static final String PROMPT_MARKER = "LLM_PROMPT";
+
+    private static final Logger log = LoggerFactory.getLogger(LlmIntentClassifier.class);
+
+    static final int TIMEOUT_SECONDS = 5;
     static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(TIMEOUT_SECONDS);
 
     private static final String DEFAULT_URL =
-            "https://open.bigmodel.cn/api/paas/v4/chat/completions";
-    private static final String DEFAULT_MODEL = "glm-4-flash";
+            "https://api.deepseek.com/chat/completions";
+    private static final String DEFAULT_MODEL = "deepseek-flash";
     private static final int MAX_ORDER_ID_LEN = 64;
 
     /** 只接受 Prompt 里列出的意图；其余（含模型自创）一律视为解析失败。 */
@@ -120,9 +131,9 @@ public class LlmIntentClassifier {
     @Autowired
     public LlmIntentClassifier(
             @Value("${chat.llm.enabled:true}") boolean enabled,
-            @Value("${chat.llm.url:https://open.bigmodel.cn/api/paas/v4/chat/completions}") String url,
+            @Value("${chat.llm.url:https://api.deepseek.com/chat/completions}") String url,
             @Value("${chat.llm.api-key:}") String apiKey,
-            @Value("${chat.llm.model:glm-4-flash}") String model,
+            @Value("${chat.llm.model:deepseek-flash}") String model,
             ObjectMapper objectMapper,
             ToolRegistry toolRegistry) {
         this(enabled, url, apiKey, model, objectMapper,
@@ -200,20 +211,26 @@ public class LlmIntentClassifier {
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
                 .build();
 
+        long startedAt = System.nanoTime();
         HttpResponse<String> response;
         try {
             response = httpClient.send(request,
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         } catch (HttpTimeoutException e) {
+            // 诊断：HttpConnectTimeoutException 是连接阶段触顶；裸 HttpTimeoutException 是响应阶段。
+            logCall(startedAt, "timeout", e.getClass().getSimpleName(), null);
             throw new LlmException("请求超时（>" + requestTimeout.toSeconds() + "s）", e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            logCall(startedAt, "interrupted", e.getClass().getSimpleName(), null);
             throw new LlmException("请求被中断", e);
         } catch (Exception e) {
             // 连接拒绝 / DNS / TLS 都在这里；异常消息只带类型，不回显 Authorization。
+            logCall(startedAt, "error", e.getClass().getSimpleName(), null);
             throw new LlmException("请求失败：" + e.getClass().getSimpleName(), e);
         }
 
+        logCall(startedAt, "ok", "-", response);
         if (response.statusCode() != 200) {
             throw new LlmException("HTTP " + response.statusCode());
         }
@@ -224,18 +241,75 @@ public class LlmIntentClassifier {
 
     /** 固定规则 + 当前角色的路由字典 + 当前角色的工具目录 +（可选）当前页。 */
     private String systemPrompt(Integer role, String currentPath) {
+        String routeCatalog = RouteCatalog.promptCatalog(role);
+        String toolCatalog = toolRegistry == null ? "" : toolRegistry.promptCatalog(role);
+        String safePath = safeCurrentPath(currentPath);
+        String pathLine = safePath == null ? "" : "用户当前所在页面：" + safePath + '\n';
+
         StringBuilder sb = new StringBuilder(SYSTEM_PROMPT);
-        sb.append('\n').append(RouteCatalog.promptCatalog(role));
+        sb.append('\n').append(routeCatalog);
         if (toolRegistry != null) {
             // 动态拼装：只列当前角色能调用的工具（含反射生成的 JSON Schema）。
-            sb.append('\n').append(toolRegistry.promptCatalog(role));
+            sb.append('\n').append(toolCatalog);
         }
-        String safePath = safeCurrentPath(currentPath);
-        if (safePath != null) {
-            sb.append("用户当前所在页面：").append(safePath).append('\n');
+        sb.append(pathLine).append(OUTPUT_FORMAT);
+        String prompt = sb.toString();
+        log.info("{} chars={} baseChars={} routeChars={} toolChars={} outputChars={} pathChars={} estTokens={}",
+                PROMPT_MARKER, prompt.length(), SYSTEM_PROMPT.length(), routeCatalog.length(),
+                toolCatalog.length(), OUTPUT_FORMAT.length(), pathLine.length(),
+                estimateTokens(prompt));
+        if (log.isDebugEnabled()) {
+            // 诊断：只在显式开 DEBUG 时落全文，供离线复现同一 Prompt（不含任何凭据）。
+            log.debug("{}_TEXT {}", PROMPT_MARKER, prompt);
         }
-        sb.append(OUTPUT_FORMAT);
-        return sb.toString();
+        return prompt;
+    }
+
+    /**
+     * 诊断：单次出网的耗时与元数据。**只读**，不参与任何分支。
+     *
+     * <p>超时时 {@code response} 为 {@code null}，{@code cause} 是异常类型
+     * （{@code HttpConnectTimeoutException} = 连接阶段；{@code HttpTimeoutException} = 响应阶段）。
+     */
+    private void logCall(long startedAtNanos, String outcome, String cause,
+                         HttpResponse<String> response) {
+        long latencyMs = (System.nanoTime() - startedAtNanos) / 1_000_000L;
+        String http = "-";
+        String requestId = "-";
+        String inputTokens = "-";
+        String outputTokens = "-";
+        if (response != null) {
+            http = String.valueOf(response.statusCode());
+            requestId = response.headers().firstValue("x-request-id")
+                    .or(() -> response.headers().firstValue("request-id"))
+                    .orElse("-");
+            if (response.statusCode() == 200) {
+                try {
+                    JsonNode usage = objectMapper.readTree(response.body()).path("usage");
+                    if (usage.has("prompt_tokens")) {
+                        inputTokens = usage.path("prompt_tokens").asText();
+                    }
+                    if (usage.has("completion_tokens")) {
+                        outputTokens = usage.path("completion_tokens").asText();
+                    }
+                } catch (Exception ignored) {
+                    // usage 只是诊断信息，解析失败不影响分类结果。
+                }
+            }
+        }
+        log.info("{} model={} outcome={} latencyMs={} http={} inputTokens={} outputTokens={} requestId={} cause={}",
+                CALL_MARKER, model, outcome, latencyMs, http, inputTokens, outputTokens,
+                requestId, cause);
+    }
+
+    /** 中文 1 字 ≈ 1.5 token，其余字符 ≈ 4 字符 / token（粗估，仅用于对比段落占比）。 */
+    static double estimateTokens(String text) {
+        double tokens = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            tokens += (c >= 0x4E00 && c <= 0x9FFF) ? 1.5 : 0.25;
+        }
+        return Math.round(tokens * 10) / 10.0;
     }
 
     /**
@@ -263,7 +337,7 @@ public class LlmIntentClassifier {
         return p;
     }
 
-    /** 从 GLM 的 {@code choices[0].message.content} 取正文。 */
+    /** 从 OpenAI 兼容响应（DeepSeek / GLM 同形）的 {@code choices[0].message.content} 取正文。 */
     private String extractContent(String responseBody) {
         try {
             JsonNode root = objectMapper.readTree(responseBody);

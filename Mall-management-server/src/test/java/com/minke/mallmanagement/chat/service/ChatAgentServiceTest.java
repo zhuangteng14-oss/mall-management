@@ -1281,12 +1281,12 @@ class ChatAgentServiceTest {
     void semanticMerchantDashboard() {
         when(semanticRouter.route(eq("怎么前往商家工作台"), eq(2)))
                 .thenReturn(new SemanticRouter.Result(ChatIntent.MERCHANT_DASHBOARD,
-                        "/merchant", 0.964, "怎么去商家工作台", 0.690, true));
+                        "/merchant/user", 0.964, "怎么去商家工作台", 0.690, true));
 
         Map<String, Object> resp = service.ask("怎么前往商家工作台", "m1", 2);
 
         assertThat(resp.get("intent")).isEqualTo("MERCHANT_DASHBOARD");
-        assertThat(actionOf(resp)).containsEntry("targetPath", "/merchant")
+        assertThat(actionOf(resp)).containsEntry("targetPath", "/merchant/user")
                 .containsEntry("type", "tour");
         assertThat(resp.get("reply")).isEqualTo("好的，我来一步步教您。点击下方按钮开始。");
     }

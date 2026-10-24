@@ -34,18 +34,19 @@ import java.util.Map;
  * 即使被注入，影响面也只限于这条聊天回复本身。
  *
  * <h2>【超时】</h2>
- * 与意图识别同为 {@value #TIMEOUT_SECONDS} 秒硬上限。累计最坏 2 次（判意图 + 写话术），
- * 仍在聊天面板的等待窗口内；任一步失败都不影响回复（模板兜底）。
+ * 与意图识别同为 {@value #TIMEOUT_SECONDS} 秒硬上限。一次问答最多 2 次出网
+ * （判意图 + 写话术），典型总耗时 <2 秒；两次都触顶时最坏约 10 秒，但任一步失败
+ * 都不影响回复（模板兜底），不会 500。
  */
 @Service
 public class LlmReplyComposer {
 
-    static final int TIMEOUT_SECONDS = 3;
+    static final int TIMEOUT_SECONDS = 5;
     static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(TIMEOUT_SECONDS);
 
     private static final String DEFAULT_URL =
-            "https://open.bigmodel.cn/api/paas/v4/chat/completions";
-    private static final String DEFAULT_MODEL = "glm-4-flash";
+            "https://api.deepseek.com/chat/completions";
+    private static final String DEFAULT_MODEL = "deepseek-flash";
 
     /** 回复正文上限：聊天气泡里超过这个长度就不像人话了，且防模型跑题。 */
     static final int MAX_REPLY_CHARS = 240;
@@ -72,9 +73,9 @@ public class LlmReplyComposer {
     @Autowired
     public LlmReplyComposer(
             @Value("${chat.llm.enabled:true}") boolean enabled,
-            @Value("${chat.llm.url:https://open.bigmodel.cn/api/paas/v4/chat/completions}") String url,
+            @Value("${chat.llm.url:https://api.deepseek.com/chat/completions}") String url,
             @Value("${chat.llm.api-key:}") String apiKey,
-            @Value("${chat.llm.model:glm-4-flash}") String model,
+            @Value("${chat.llm.model:deepseek-flash}") String model,
             ObjectMapper objectMapper) {
         this(enabled, url, apiKey, model, objectMapper,
                 HttpClient.newBuilder().connectTimeout(DEFAULT_TIMEOUT).build(),
@@ -156,7 +157,7 @@ public class LlmReplyComposer {
                 + "事实：\n" + facts.trim();
     }
 
-    /** 从 GLM 的 {@code choices[0].message.content} 取正文；结构不对 ⇒ {@code null}。 */
+    /** 从 OpenAI 兼容响应（DeepSeek / GLM 同形）的 {@code choices[0].message.content} 取正文；结构不对 ⇒ {@code null}。 */
     private String contentOf(String responseBody) {
         try {
             JsonNode root = objectMapper.readTree(responseBody);

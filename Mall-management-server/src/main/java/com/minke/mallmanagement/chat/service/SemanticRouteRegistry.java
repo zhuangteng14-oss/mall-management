@@ -44,7 +44,7 @@ final class SemanticRouteRegistry {
             route(ChatIntent.GOODS_MANAGE, "/merchant/user/list", MERCHANT,
                     "我要管理商品", "怎么看我的商品", "我上架的货在哪", "商品列表",
                     "我想改一下商品价格"),
-            route(ChatIntent.MERCHANT_DASHBOARD, "/merchant", MERCHANT,
+            route(ChatIntent.MERCHANT_DASHBOARD, "/merchant/user", MERCHANT,
                     "怎么去商家工作台", "我要进后台", "商家控制台在哪", "商家后台怎么进",
                     "打开商家中心"),
             route(ChatIntent.ORDER_QUERY, null, BOTH,
