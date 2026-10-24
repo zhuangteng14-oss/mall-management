@@ -204,7 +204,7 @@ try {
   const vague = await sendChat('今天天气不错')
   ok('「今天天气不错」⇒ CLARIFY（相似度 < 0.75 不硬猜）',
     vague.done && vague.body?.intent === 'CLARIFY'
-      && String(vague.body?.reply || '').includes('请问您是想查订单'),
+      && String(vague.body?.reply || '').includes('没太听懂您的意思'),
     { intent: vague.body?.intent, reply: String(vague.body?.reply || '').slice(0, 100) })
   ok('澄清时不返回 action（不擅自导航）', !vague.body?.action, { action: vague.body?.action ?? null })
   await b.shot(path.join(OUT, 'semantic-04-clarify.png'))

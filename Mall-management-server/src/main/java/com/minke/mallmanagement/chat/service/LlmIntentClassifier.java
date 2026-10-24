@@ -101,6 +101,10 @@ public class LlmIntentClassifier {
             - 数据查询 ⇒ ORDER_QUERY（订单进度）、REFUND_QUERY（售后进度）、
               COMMENT_QUERY（评论内容）、GOODS_QUERY（某件商品的价格 / 参数 / 库存）。
               数据查询**不要**给 target_path。
+            - 购物 / 买家行为 ⇒ **GOODS_QUERY**（商家身份同样适用）：问「在哪购买 / 怎么买 /
+              想买 / 帮我找 / 搜索某商品 / 某商品多少钱」都归这里，**不是** GOODS_MANAGE，
+              也**不是** MERCHANT_DASHBOARD。把商品名或型号（如 护膝 / 蓝牙耳机 / oppo12）
+              填进 slots.goodsKeyword，不要填 target_path。
             - 业务动作 ⇒ OPEN_STORE（开店 / 入驻）、ADD_TO_SECKILL（报名秒杀）、
               FAQ / GREETING / HELP / UNKNOWN。
             规则：
@@ -417,7 +421,45 @@ public class LlmIntentClassifier {
             orderId = null;
         }
         String targetPath = parseTargetPath(root, intent, role);
-        return new Result(intent, orderId, needPublish, targetPath, tool, parseArgs(slots));
+        Map<String, Object> args = parseArgs(slots);
+        if (intent == ChatIntent.GOODS_QUERY) {
+            // Prompt 的口径是 slots.goodsKeyword；个别模型会把商品名塞进 target_path。
+            // 只接受「不像路径」的值（不以 / 开头），否则宁可丢掉，也不能把页面当商品名。
+            String keyword = parseGoodsKeyword(root, slots);
+            if (!isBlank(keyword)) {
+                args = args == null ? new LinkedHashMap<>() : new LinkedHashMap<>(args);
+                args.put("goodsKeyword", keyword);
+            }
+        }
+        return new Result(intent, orderId, needPublish, targetPath, tool, args);
+    }
+
+    /** 商品名 / 型号：slots.goodsKeyword 优先，其次顶层的 goodsKeyword / target_path。 */
+    private static String parseGoodsKeyword(JsonNode root, JsonNode slots) {
+        JsonNode node = slots == null ? null : slots.get("goodsKeyword");
+        if (node == null || node.isNull()) {
+            node = root.get("goodsKeyword");
+        }
+        if (node == null || node.isNull()) {
+            node = root.get("goods_keyword");
+        }
+        if (node != null && !node.isNull()) {
+            String value = node.asText("").trim();
+            if (!value.isEmpty()) {
+                return value;
+            }
+        }
+        JsonNode path = root.get("target_path");
+        if (path == null) {
+            path = root.get("targetPath");
+        }
+        if (path != null && !path.isNull()) {
+            String value = path.asText("").trim();
+            if (!value.isEmpty() && !value.startsWith("/")) {
+                return value;
+            }
+        }
+        return null;
     }
 
     /**

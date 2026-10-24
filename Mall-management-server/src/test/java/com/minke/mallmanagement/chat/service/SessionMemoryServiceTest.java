@@ -115,6 +115,22 @@ class SessionMemoryServiceTest {
 
         assertThatCode(() -> service.remember("c1", "查订单", ChatIntent.ORDER_QUERY, null, "…"))
                 .doesNotThrowAnyException();
-        assertThat(service.lastContext("c1")).isNull();
+        // Redis 挂了也保留进程内兜底：连续澄清防复读仍可用。
+        assertThat(service.lastContext("c1")).isNotNull();
+        assertThat(service.lastContext("c1").intent()).isEqualTo(ChatIntent.ORDER_QUERY);
+    }
+
+    @Test
+    @DisplayName("没有 Redis：进程内兜底仍能记住上一轮 CLARIFY")
+    @SuppressWarnings("unchecked")
+    void inProcessFallbackWithoutRedis() {
+        ObjectProvider<StringRedisTemplate> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(null);
+        SessionMemoryService local = new SessionMemoryService(provider, mapper);
+
+        local.remember("m1", "随便说一句", ChatIntent.CLARIFY, null, "没太听懂");
+
+        assertThat(local.lastContext("m1")).isNotNull();
+        assertThat(local.lastContext("m1").intent()).isEqualTo(ChatIntent.CLARIFY);
     }
 }

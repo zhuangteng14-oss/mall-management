@@ -329,6 +329,22 @@ class LlmIntentClassifierTest {
     }
 
     @Test
+    @DisplayName("购物兜底：GOODS_QUERY 把商品名塞进 target_path ⇒ 仍按商品名收，不当路径")
+    void goodsQueryAcceptsKeywordFromTargetPath() throws IOException {
+        String url = serve(200, envelope(
+                "{\"intent\":\"GOODS_QUERY\",\"target_path\":\"护膝\","
+                        + "\"slots\":{\"goodsKeyword\":null}}"),
+                null, null);
+
+        LlmIntentClassifier.Result result = classifier(url, Duration.ofSeconds(3))
+                .classify("护膝在哪买", 2, "/merchant");
+
+        assertThat(result.intent()).isEqualTo(ChatIntent.GOODS_QUERY);
+        assertThat(result.targetPath()).isNull();
+        assertThat(result.args()).containsEntry("goodsKeyword", "护膝");
+    }
+
+    @Test
     @DisplayName("tool 字段：模型调当前角色没有的工具 / 不存在的工具 ⇒ LlmException（不执行）")
     void rejectsToolOutsideRoleOrUnknown() throws IOException {
         String forbidden = serve(200, envelope(

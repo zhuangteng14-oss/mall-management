@@ -71,6 +71,49 @@ class ChatIntentRecognizerTest {
     }
 
     @Test
+    @DisplayName("买家行为五连：在哪购买 / 想买 / 搜索 / 多少钱 都归 GOODS_QUERY（商家同样适用）")
+    void buyerShoppingPhrasesMapToGoodsQuery() {
+        String[] phrases = {
+                "oppo12这商品在哪购买？",
+                "我想买个护膝",
+                "怎么搜索蓝牙耳机",
+                "这手机多少钱",
+                "帮我找一个蓝牙耳机",
+        };
+        for (String phrase : phrases) {
+            assertThat(ChatIntentRecognizer.recognize(phrase).intent())
+                    .as(phrase)
+                    .isEqualTo(ChatIntent.GOODS_QUERY);
+        }
+    }
+
+    @Test
+    @DisplayName("购物关键词：型号与中文名都能抽出来，泛称不当商品名")
+    void extractsShoppingKeyword() {
+        assertThat(ChatIntentRecognizer.extractShoppingKeyword(
+                ChatIntentRecognizer.normalize("oppo12这商品在哪购买？"))).isEqualTo("oppo12");
+        assertThat(ChatIntentRecognizer.extractShoppingKeyword(
+                ChatIntentRecognizer.normalize("我想买个护膝"))).isEqualTo("护膝");
+        assertThat(ChatIntentRecognizer.extractShoppingKeyword(
+                ChatIntentRecognizer.normalize("怎么搜索蓝牙耳机"))).isEqualTo("蓝牙耳机");
+        assertThat(ChatIntentRecognizer.extractShoppingKeyword(
+                ChatIntentRecognizer.normalize("这手机多少钱"))).isEqualTo("手机");
+        assertThat(ChatIntentRecognizer.extractShoppingKeyword(
+                ChatIntentRecognizer.normalize("帮我找一个蓝牙耳机"))).isEqualTo("蓝牙耳机");
+        assertThat(ChatIntentRecognizer.extractShoppingKeyword(
+                ChatIntentRecognizer.normalize("这个商品多少钱"))).isNull();
+    }
+
+    @Test
+    @DisplayName("商家管理语句不会被购物规则抢走")
+    void merchantManagementIsNotShopping() {
+        assertThat(ChatIntentRecognizer.looksLikeShopping(
+                ChatIntentRecognizer.normalize("我要管理商品"))).isFalse();
+        assertThat(ChatIntentRecognizer.looksLikeShopping(
+                ChatIntentRecognizer.normalize("怎么上架商品"))).isFalse();
+    }
+
+    @Test
     @DisplayName("商品查询：带冒号的编号原样进商品槽位，不当订单号")
     void goodsQueryWithPrefixedCode() {
         String text = ChatIntentRecognizer.normalize("怎么看 222:ij-555 商品的详细数据");

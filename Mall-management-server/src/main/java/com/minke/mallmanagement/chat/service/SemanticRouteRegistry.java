@@ -56,9 +56,12 @@ final class SemanticRouteRegistry {
                     "查退款进度", "我的售后处理到哪了", "退货结果怎么样", "退款到账了吗"),
             route(ChatIntent.COMMENT_QUERY, null, BOTH,
                     "我要看评论", "有没有人给我评论", "评价内容在哪看", "买家留言在哪"),
+            // 购物 / 买家行为：**BOTH** —— 商家也是消费者，Role=2 问「护膝在哪买」
+            // 必须走这里，而不是 GOODS_MANAGE（2026-10-24 跨域修复）。
             route(ChatIntent.GOODS_QUERY, null, BOTH,
                     "这个商品多少钱", "查商品详情", "商品还有库存吗", "帮我找一下商品",
-                    "怎么看商品的详细数据"),
+                    "怎么看商品的详细数据", "这个商品在哪购买", "这个商品怎么买",
+                    "我想买一个", "怎么搜索商品", "帮我找一个蓝牙耳机"),
 
             // ── 业务动作 ──────────────────────────────────────────────────────
             route(ChatIntent.OPEN_STORE, "/customer/user/apply", BOTH,

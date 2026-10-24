@@ -19,8 +19,10 @@ import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.net.URLEncoder;
 import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpTimeoutException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -299,7 +301,7 @@ public class ChatAgentService {
             // 旧值兜底：模型 / 旧调用点仍可能给出 NAVIGATE ⇒ 按默认引导处理。
             case NAVIGATE -> answerNavigate(decision.targetPath(), userId, role,
                     decision.needPublish(), isDirectNavigation(normalized));
-            case CLARIFY -> answerClarify(role);
+            case CLARIFY -> answerClarify(role, userId, message);
             case IDENTITY_CLAIM -> answerIdentityClaim(message, userId, role);
             case GREETING -> answerSmallTalk(intent,
                     "你好呀～我可以帮你查订单、查售后进度，也能一键带你去开店。");
@@ -417,7 +419,7 @@ public class ChatAgentService {
         }
         // 商品名 / 编号：模型漏抽时用确定性规则补一刀（编号里的冒号、连字符原样保留）。
         if (decision.intent() == ChatIntent.GOODS_QUERY && isBlank(str(args.get("goodsKeyword")))) {
-            String keyword = ChatIntentRecognizer.extractGoodsKeyword(
+            String keyword = ChatIntentRecognizer.extractShoppingKeyword(
                     ChatIntentRecognizer.normalize(message));
             if (!isBlank(keyword)) {
                 args.put("goodsKeyword", keyword);
@@ -494,11 +496,21 @@ public class ChatAgentService {
             if (!semantic.confident()) {
                 trace.llmFallback = "semantic_not_confident";
                 Decision deterministic = deterministicFallback(message, normalized, faq, userId, role);
-                return deterministic != null ? deterministic
-                        : new Decision(ChatIntent.CLARIFY, null, false, null);
+                if (deterministic != null) {
+                    return deterministic;
+                }
+                // 语义低分不再直接澄清：先让 DeepSeek 再判一次，超时 / 失败才落 CLARIFY。
+                Decision viaLlm = llmFallbackDecision(message, normalized, faq, role, currentPath, trace);
+                return viaLlm != null ? viaLlm : new Decision(ChatIntent.CLARIFY, null, false, null);
             }
             trace.llmFallback = "semantic_confident";
-            return semanticDecision(semantic, message, normalized, userId);
+            Decision semanticDecision = semanticDecision(semantic, message, normalized, userId);
+            // 语义层偶尔会把「在哪买」吸到 GOODS_MANAGE；买家行为一律以购物规则为准。
+            if (ChatIntentRecognizer.looksLikeShopping(normalized)
+                    && semanticDecision.intent() != ChatIntent.GOODS_QUERY) {
+                return shoppingDecision(normalized);
+            }
+            return semanticDecision;
         }
 
         if (llmClassifier != null && llmClassifier.isEnabled()) {
@@ -528,6 +540,11 @@ public class ChatAgentService {
                 // 政策 FAQ 是本地确定性知识：即使模型把它判成 REFUND，也不能答成「查退款进度」。
                 if (faq != null && faq.policy()) {
                     return new Decision(ChatIntent.FAQ, null, false, null);
+                }
+                // 购物 / 买家行为优先于模型分类：商家问「护膝在哪买」时，小模型容易
+                // 顺着身份判成 GOODS_MANAGE。规则判据确定性地拉回 GOODS_QUERY。
+                if (ChatIntentRecognizer.looksLikeShopping(normalized)) {
+                    return shoppingDecision(normalized);
                 }
                 // ⚠️ 只有「没选工具」的 UNKNOWN 才交给规则引擎。插件工具（intent=UNKNOWN）
                 // 是模型明确选了要调的方法 —— 送去规则引擎反而会把这次调用丢掉。
@@ -656,6 +673,9 @@ public class ChatAgentService {
         if (faq != null) {
             return new Decision(ChatIntent.FAQ, null, false, null);
         }
+        if (ChatIntentRecognizer.looksLikeShopping(normalized)) {
+            return shoppingDecision(normalized);
+        }
         ChatIntentRecognizer.Match rule = ChatIntentRecognizer.recognize(message);
         String goodsKeyword = ChatIntentRecognizer.extractGoodsKeyword(normalized);
         boolean dataOrAction = rule.intent() == ChatIntent.ORDER_QUERY
@@ -683,6 +703,80 @@ public class ChatAgentService {
     }
 
     /**
+     * 购物 / 买家行为 → 统一决策：{@link ChatIntent#GOODS_QUERY} + 商品名槽位。
+     *
+     * <p>意图名保持 GOODS_QUERY（前端 / 探针的既有口径不变）；{@code answerGoods} 再根据
+     * {@link ChatIntentRecognizer#wantsSearch} 决定是给商品卡还是「去商城搜索」动作。
+     */
+    private static Decision shoppingDecision(String normalized) {
+        String keyword = ChatIntentRecognizer.extractShoppingKeyword(normalized);
+        return new Decision(ChatIntent.GOODS_QUERY, null, false, null, null,
+                isBlank(keyword) ? null : Map.of("goodsKeyword", keyword));
+    }
+
+    /**
+     * 语义相似度低时的 **LLM 二次判定**（2026-10-24）。
+     *
+     * <p>只有确定性命中不了才走到这里；模型给 UNKNOWN / CLARIFY 或超时 / 异常 ⇒ 返回
+     * {@code null}，由调用方落 CLARIFY。返回的意图仍要过购物规则与直达词面这两道闸。
+     */
+    private Decision llmFallbackDecision(String message, String normalized,
+                                         FaqKnowledgeBase.Answer faq, Integer role,
+                                         String currentPath, Trace trace) {
+        if (llmClassifier == null || !llmClassifier.isEnabled()) {
+            trace.llmFallback = "semantic_low_llm_disabled";
+            return null;
+        }
+        trace.llmUsed = true;
+        long startedAt = System.nanoTime();
+        try {
+            LlmIntentClassifier.Result result = llmClassifier.classify(message, role, currentPath);
+            trace.llmLatencyMs = (System.nanoTime() - startedAt) / 1_000_000L;
+            trace.llmTimeoutType = "none";
+            trace.llmFallback = "semantic_low_llm";
+            ChatIntent intent = result.intent();
+            if (intent == ChatIntent.UNKNOWN || intent == ChatIntent.CLARIFY) {
+                return null;
+            }
+            if (faq != null && faq.policy()) {
+                return new Decision(ChatIntent.FAQ, null, false, null);
+            }
+            if (ChatIntentRecognizer.looksLikeShopping(normalized)) {
+                return shoppingDecision(normalized);
+            }
+            boolean direct = isDirectNavigation(normalized);
+            if (isNavigation(intent)) {
+                // 模型只给了导航意图却没给可归位的路径 ⇒ 不猜，交回澄清。
+                if (isBlank(result.targetPath())) {
+                    return null;
+                }
+                intent = direct ? ChatIntent.DIRECT_NAVIGATION : ChatIntent.GUIDE_NAVIGATION;
+            }
+            Map<String, Object> args = result.args();
+            String goodsKeyword = args == null ? null : str(args.get("goodsKeyword"));
+            if (intent == ChatIntent.GOODS_QUERY && isBlank(goodsKeyword)) {
+                String keyword = ChatIntentRecognizer.extractShoppingKeyword(normalized);
+                if (!isBlank(keyword)) {
+                    args = new LinkedHashMap<>(args == null ? Map.of() : args);
+                    args.put("goodsKeyword", keyword);
+                }
+            }
+            return new Decision(intent, result.orderId(), result.needPublish(),
+                    result.targetPath(), result.tool(), args);
+        } catch (RuntimeException e) {
+            if (trace.llmLatencyMs == null) {
+                trace.llmLatencyMs = (System.nanoTime() - startedAt) / 1_000_000L;
+            }
+            trace.llmTimeoutType = timeoutType(e);
+            trace.llmFallback = "semantic_low_llm_error:" + e.getClass().getSimpleName();
+            trace.degradeReason = "llm_failed";
+            log.warn("语义低分后的 LLM 二次判定失败，落澄清：{}: {}",
+                    e.getClass().getSimpleName(), e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * 语义命中的结果 → 编排层决策。
      *
      * <p>语义层只说「像哪个意图 / 哪页」，不抽业务槽位：订单号仍由规则提取器从原文取，
@@ -706,7 +800,7 @@ public class ChatAgentService {
         }
         Map<String, Object> args = null;
         if (intent == ChatIntent.GOODS_QUERY) {
-            String keyword = ChatIntentRecognizer.extractGoodsKeyword(normalized);
+            String keyword = ChatIntentRecognizer.extractShoppingKeyword(normalized);
             if (!isBlank(keyword)) {
                 args = Map.of("goodsKeyword", keyword);
             }
@@ -751,7 +845,7 @@ public class ChatAgentService {
         }
 
         if (intent == ChatIntent.GOODS_QUERY) {
-            String keyword = ChatIntentRecognizer.extractGoodsKeyword(normalized);
+            String keyword = ChatIntentRecognizer.extractShoppingKeyword(normalized);
             return new Decision(intent, null, false, null, null,
                     isBlank(keyword) ? null : Map.of("goodsKeyword", keyword));
         }
@@ -862,16 +956,34 @@ public class ChatAgentService {
      */
     Map<String, Object> answerGoods(String question, String userId, Integer role,
                                     String wantedKeyword) {
+        String normalized = ChatIntentRecognizer.normalize(question);
         String keyword = isBlank(wantedKeyword)
-                ? ChatIntentRecognizer.extractGoodsKeyword(ChatIntentRecognizer.normalize(question))
+                ? ChatIntentRecognizer.extractShoppingKeyword(normalized)
                 : wantedKeyword.trim();
+        // 买家行为（在哪买 / 想买 / 搜索 / 帮我找）：回复要给「去商城搜索」动作，
+        // 而不是只给一张商品卡。商家身份同样适用 —— 商家也是消费者。
+        boolean shopping = ChatIntentRecognizer.looksLikeShopping(normalized);
+        boolean wantsSearch = ChatIntentRecognizer.wantsSearch(normalized);
         if (isBlank(keyword)) {
+            if (shopping) {
+                return reply(ChatIntent.GOODS_QUERY,
+                        "您想找什么商品？把商品名或型号发我（例如「护膝」「蓝牙耳机」「oppo12」），"
+                                + "我直接带您去商城搜索。",
+                        null, searchAction(null, role),
+                        List.of(searchSuggestion(null), "查我的订单"));
+            }
             return reply(ChatIntent.GOODS_QUERY,
                     "请告诉我要查哪个商品：把商品名或编号发我（例如「oppo12」或「222:ij-555」），"
                             + "我帮你查价格、库存和在售状态。",
                     null, null, List.of("查我的订单", "怎么开店"));
         }
         if (goodsDao == null) {
+            if (shopping) {
+                return reply(ChatIntent.GOODS_QUERY,
+                        "商品查询暂时不可用，不过您可以直接去商城搜索「" + keyword + "」。",
+                        null, searchAction(keyword, role),
+                        List.of(searchSuggestion(keyword), "查我的订单"));
+            }
             return reply(ChatIntent.GOODS_QUERY,
                     "商品查询暂时不可用，请到商城搜索页按关键词搜索。", null, null, null);
         }
@@ -881,6 +993,12 @@ public class ChatAgentService {
         } catch (RuntimeException e) {
             log.warn("商品查询失败（keyword={}）：{}: {}", keyword,
                     e.getClass().getSimpleName(), e.getMessage());
+            if (shopping) {
+                return reply(ChatIntent.GOODS_QUERY,
+                        "商品查询暂时失败，您可以直接去商城搜索「" + keyword + "」。",
+                        null, searchAction(keyword, role),
+                        List.of(searchSuggestion(keyword), "查我的订单"));
+            }
             return reply(ChatIntent.GOODS_QUERY,
                     "商品查询暂时失败，请稍后重试，或到商城搜索页按关键词搜索。", null, null, null);
         }
@@ -889,6 +1007,13 @@ public class ChatAgentService {
         if (rows == null || rows.isEmpty()) {
             data.put("found", false);
             data.put("total", 0);
+            if (shopping) {
+                return reply(ChatIntent.GOODS_QUERY,
+                        "店里暂时没有搜到「" + keyword + "」，不过商城搜索还能找其他店铺的同款。"
+                                + "点下面按钮，我直接带您去搜索页。",
+                        data, searchAction(keyword, role),
+                        List.of(searchSuggestion(keyword), "查我的订单"));
+            }
             return reply(ChatIntent.GOODS_QUERY,
                     "未找到商品「" + keyword + "」。请核对商品名或编号后重试，"
                             + "也可以到商城搜索页按关键词搜索。",
@@ -915,11 +1040,17 @@ public class ChatAgentService {
             text.append("，分类 ").append(type);
         }
         text.append("，").append(onSale ? "正在热卖中。" : "当前" + state + "。");
-        if (onSale) {
+        if (wantsSearch) {
+            text.append("在商城搜索「").append(keyword).append("」就能看到它，"
+                    + "点下面按钮我直接带您去搜索页。");
+        } else if (onSale) {
             text.append("您可以点击下方按钮，我直接带您去详情页看看。");
         }
 
         List<Object> suggestions = new ArrayList<>();
+        if (wantsSearch) {
+            suggestions.add(searchSuggestion(keyword));
+        }
         if (onSale) {
             suggestions.add(goodsSuggestion(name));
         }
@@ -929,7 +1060,44 @@ public class ChatAgentService {
         data.put("found", true);
         data.put("total", rows.size());
         data.put("goods", goodsCards(rows));
-        return reply(ChatIntent.GOODS_QUERY, text.toString(), data, null, suggestions);
+        Object action = wantsSearch ? searchAction(keyword, role) : null;
+        return reply(ChatIntent.GOODS_QUERY, text.toString(), data, action, suggestions);
+    }
+
+    /**
+     * 商城搜索落点：买家 {@code /customer/search}，商家 {@code /merchant/search}，
+     * 关键词用 {@code kw} 透传（前端 GoodsSelect 读取）。
+     *
+     * <p>⚠️ 不走 {@link RouteCatalog#resolve}：它按设计会剥掉 {@code ?query}，
+     * 而这里的关键词正是要带给搜索页的参数。
+     */
+    static String searchPath(Integer role, String keyword) {
+        String base = isMerchant(role) ? "/merchant/search" : "/customer/search";
+        if (isBlank(keyword)) {
+            return base;
+        }
+        return base + "?kw=" + URLEncoder.encode(keyword, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
+    /** 「去商城搜索」动作：直达搜索页并带上关键词（搜索页在所有壳里都能打开）。 */
+    private static Map<String, Object> searchAction(String keyword, Integer role) {
+        Map<String, Object> action = new LinkedHashMap<>();
+        action.put("type", "jump");
+        action.put("targetPath", searchPath(role, keyword));
+        action.put("targetLabel", "商城搜索");
+        action.put("label", "去商城搜索");
+        return action;
+    }
+
+    /** 「去商城搜索」胶囊：前端据此 push 搜索页；与 action 并存时用户点哪个都能到。 */
+    private static Map<String, Object> searchSuggestion(String keyword) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("label", "去商城搜索");
+        item.put("routeKey", "search");
+        if (!isBlank(keyword)) {
+            item.put("keyword", keyword);
+        }
+        return item;
     }
 
     /**
@@ -1617,19 +1785,63 @@ public class ChatAgentService {
         return reply(intent, text, null, navAction(path, title, direct), defaultSuggestions());
     }
 
-    /** 相似度低于 0.75 时的澄清问句（不猜意图）。 */
-    private Map<String, Object> answerClarify(Integer role) {
+    /**
+     * 相似度低于 0.75、且确定性 / LLM 都没接住时的澄清问句（不猜意图）。
+     *
+     * <p>三条硬规则：
+     * <ol>
+     *   <li><b>按角色给胶囊</b>：买家只给「去搜商品 / 查我的订单 / 怎么去个人中心」，
+     *       绝不出现「管理商品 / 工作台」；商家才给管理入口。</li>
+     *   <li><b>有商品名词就转向搜索</b>：不硬抛一套通用选项，直接问「是想搜索相关商品吗」
+     *       并给【去商城搜索】。</li>
+     *   <li><b>连续两次 CLARIFY 换话术</b>：上一轮也是 CLARIFY 时不再重复同一组选项，
+     *       改为「换个说法 / 联系人工客服」。</li>
+     * </ol>
+     */
+    private Map<String, Object> answerClarify(Integer role, String userId, String message) {
+        String keyword = ChatIntentRecognizer.extractShoppingKeyword(
+                ChatIntentRecognizer.normalize(message));
+        SessionMemoryService.Context context = context(userId);
+        boolean repeated = context != null && context.intent() == ChatIntent.CLARIFY;
+
+        if (repeated) {
+            // 复读机修复：第二次澄清必须换话术，且不再出现任何角色选项。
+            List<Object> chips = new ArrayList<>();
+            chips.add(searchSuggestion(keyword));
+            chips.add("联系人工客服");
+            return reply(ChatIntent.CLARIFY,
+                    "抱歉，我还是没太听懂。您可以直接输入商品名称去搜索，"
+                            + "或者点下方按钮联系人工客服。",
+                    null, isBlank(keyword) ? null : searchAction(keyword, role), chips);
+        }
+
+        if (!isBlank(keyword)) {
+            List<Object> chips = new ArrayList<>();
+            chips.add(searchSuggestion(keyword));
+            addClarifyRoleChips(chips, role);
+            return reply(ChatIntent.CLARIFY,
+                    "没太听懂您的意思，您是想搜索「" + keyword + "」相关商品吗？",
+                    null, searchAction(keyword, role), chips);
+        }
+
         List<Object> chips = new ArrayList<>();
+        chips.add(searchSuggestion(null));
+        addClarifyRoleChips(chips, role);
+        String text = isMerchant(role)
+                ? "没太听懂您的意思。您可以问我：搜商品、查订单、管理商品，或者去工作台。"
+                : "没太听懂您的意思。您可以问我：搜商品、查订单，或者去个人中心。";
+        return reply(ChatIntent.CLARIFY, text, null, null, chips);
+    }
+
+    /** 澄清胶囊的角色差异：买家永远看不到「管理商品 / 工作台」。 */
+    private static void addClarifyRoleChips(List<Object> chips, Integer role) {
         chips.add("查我的订单");
-        if (role == null || role == 2) {
-            chips.add("怎么看我上架的商品");
-            chips.add("怎么前往商家工作台");
+        if (isMerchant(role)) {
+            chips.add("管理商品");
+            chips.add("前往商家工作台");
         } else {
             chips.add("怎么去个人中心");
-            chips.add("怎么处理退款");
         }
-        return reply(ChatIntent.CLARIFY,
-                "请问您是想查订单、管理商品，还是去工作台？", null, null, chips);
     }
 
     // ==================== 身份自述（增量-A 规则 2） ====================
@@ -1751,7 +1963,9 @@ public class ChatAgentService {
                 || intent == ChatIntent.REFUND_QUERY
                 || intent == ChatIntent.OPEN_STORE
                 || intent == ChatIntent.ADD_TO_SECKILL
-                || intent == ChatIntent.IDENTITY_CLAIM;
+                || intent == ChatIntent.IDENTITY_CLAIM
+                // 连续澄清防复读：必须记住上一轮是 CLARIFY，否则第二轮永远看不到上下文。
+                || intent == ChatIntent.CLARIFY;
     }
 
     /** 从回复体里取「这一轮实际讲的订单号」，供下一句「到哪了」复用。 */

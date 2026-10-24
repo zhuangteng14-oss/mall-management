@@ -1306,19 +1306,120 @@ class ChatAgentServiceTest {
     }
 
     @Test
-    @DisplayName("语义护栏：相似度 < 0.75 ⇒ CLARIFY，不硬猜（即使 LLM 可用）")
+    @DisplayName("语义护栏：相似度 < 0.75 ⇒ LLM 二次判定也接不住时才 CLARIFY")
     void semanticLowScoreClarifies() {
         when(semanticRouter.route(eq("今天天气不错"), eq(2)))
                 .thenReturn(new SemanticRouter.Result(ChatIntent.ORDER_QUERY,
                         null, 0.57, "查我的订单", 0.54, false));
         llmEnabled();
+        when(llmClassifier.classify(any(), any(), any()))
+                .thenReturn(new LlmIntentClassifier.Result(ChatIntent.UNKNOWN, null, false, null));
 
         Map<String, Object> resp = service.ask("今天天气不错", "m1", 2);
 
         assertThat(resp.get("intent")).isEqualTo("CLARIFY");
-        assertThat(resp.get("reply")).isEqualTo("请问您是想查订单、管理商品，还是去工作台？");
+        assertThat(resp.get("reply"))
+                .isEqualTo("没太听懂您的意思。您可以问我：搜商品、查订单、管理商品，或者去工作台。");
         assertThat(resp).doesNotContainKey("action");
-        verify(llmClassifier, never()).classify(anyString(), any(), anyString());
+        // 语义低分不再短路 LLM：必须再判一次。
+        verify(llmClassifier).classify(eq("今天天气不错"), eq(2), isNull());
+    }
+
+    @Test
+    @DisplayName("语义低分 + LLM 兜底：模型给出业务意图就照它走，不再澄清")
+    void semanticLowScoreFallsBackToLlm() {
+        when(semanticRouter.route(eq("我那个东西咋样了"), eq(2)))
+                .thenReturn(new SemanticRouter.Result(ChatIntent.CLARIFY,
+                        null, 0.58, "查我的订单", 0.55, false));
+        llmEnabled();
+        when(llmClassifier.classify(any(), any(), any())).thenReturn(
+                new LlmIntentClassifier.Result(ChatIntent.GOODS_MANAGE, null, false,
+                        "/merchant/user/list"));
+
+        Map<String, Object> resp = service.ask("我那个东西咋样了", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("GOODS_MANAGE");
+        verify(llmClassifier).classify(eq("我那个东西咋样了"), eq(2), isNull());
+    }
+
+    @Test
+    @DisplayName("跨域购物：商家问「护膝在哪买」⇒ GOODS_QUERY + /merchant/search?kw=护膝")
+    void merchantBuyingGetsSearchAction() {
+        when(semanticRouter.route(eq("护膝在哪买"), eq(2)))
+                .thenReturn(new SemanticRouter.Result(ChatIntent.GOODS_MANAGE,
+                        "/merchant/user/list", 0.66, "我要管理商品", 0.61, false));
+
+        Map<String, Object> resp = service.ask("护膝在哪买", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("GOODS_QUERY");
+        assertThat(resp.get("reply").toString()).doesNotContain("管理商品");
+        assertThat(actionOf(resp)).containsEntry("type", "jump")
+                .containsEntry("targetPath", "/merchant/search?kw=%E6%8A%A4%E8%86%9D")
+                .containsEntry("label", "去商城搜索");
+        assertThat(objectSuggestions(resp))
+                .anySatisfy(s -> assertThat(s).containsEntry("routeKey", "search")
+                        .containsEntry("keyword", "护膝"));
+    }
+
+    @Test
+    @DisplayName("跨域购物：买家问「oppo12这商品在哪购买」⇒ /customer/search?kw=oppo12")
+    void customerBuyingGetsSearchAction() {
+        when(semanticRouter.route(eq("oppo12这商品在哪购买？"), eq(1)))
+                .thenReturn(new SemanticRouter.Result(ChatIntent.GOODS_QUERY,
+                        null, 0.55, "这个商品多少钱", 0.52, false));
+        when(goodsDao.selectForChat(eq("oppo12"), anyInt())).thenReturn(List.of());
+
+        Map<String, Object> resp = service.ask("oppo12这商品在哪购买？", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("GOODS_QUERY");
+        assertThat(actionOf(resp)).containsEntry("type", "jump")
+                .containsEntry("targetPath", "/customer/search?kw=oppo12");
+    }
+
+    @Test
+    @DisplayName("澄清胶囊按角色：买家不出现「管理商品 / 工作台」")
+    void buyerClarifyHasNoMerchantChips() {
+        when(semanticRouter.route(eq("那个东西呢"), eq(1)))
+                .thenReturn(new SemanticRouter.Result(ChatIntent.CLARIFY,
+                        null, 0.50, "查我的订单", 0.48, false));
+
+        Map<String, Object> resp = service.ask("那个东西呢", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("CLARIFY");
+        String chips = String.valueOf(resp.get("suggestions"));
+        assertThat(chips).contains("去商城搜索", "查我的订单", "怎么去个人中心")
+                .doesNotContain("管理商品", "工作台");
+    }
+
+    @Test
+    @DisplayName("澄清胶囊按角色：商家才有「管理商品 / 前往商家工作台」")
+    void merchantClarifyHasMerchantChips() {
+        when(semanticRouter.route(eq("那个东西呢"), eq(2)))
+                .thenReturn(new SemanticRouter.Result(ChatIntent.CLARIFY,
+                        null, 0.50, "查我的订单", 0.48, false));
+
+        Map<String, Object> resp = service.ask("那个东西呢", "m1", 2);
+
+        String chips = String.valueOf(resp.get("suggestions"));
+        assertThat(chips).contains("去商城搜索", "查我的订单", "管理商品", "前往商家工作台");
+    }
+
+    @Test
+    @DisplayName("复读机修复：上一轮也是 CLARIFY ⇒ 换话术且不再给角色选项")
+    void secondClarifyChangesWording() {
+        when(memoryService.lastContext("m1"))
+                .thenReturn(new SessionMemoryService.Context(ChatIntent.CLARIFY, null));
+        when(semanticRouter.route(eq("今天天气不错"), eq(2)))
+                .thenReturn(new SemanticRouter.Result(ChatIntent.CLARIFY,
+                        null, 0.50, "查我的订单", 0.48, false));
+
+        Map<String, Object> resp = service.ask("今天天气不错", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("CLARIFY");
+        assertThat(resp.get("reply").toString())
+                .isEqualTo("抱歉，我还是没太听懂。您可以直接输入商品名称去搜索，或者点下方按钮联系人工客服。");
+        String chips = String.valueOf(resp.get("suggestions"));
+        assertThat(chips).doesNotContain("管理商品", "工作台", "查我的订单");
     }
 
     @Test

@@ -295,6 +295,14 @@ async function onSuggestion(s) {
       router.push(applyPath()).catch(() => {})
       return
     }
+    if (s.routeKey === 'search') {
+      // 「去商城搜索」：买家 / 商家分壳；关键词走 query，由 GoodsSelect 读取。
+      close()
+      const base = isMerchantRole() ? '/merchant/search' : '/customer/search'
+      const kw = s.keyword ? String(s.keyword) : ''
+      router.push({ path: base, query: kw ? { kw } : {} }).catch(() => {})
+      return
+    }
     // 未知 routeKey（R6 / N7）：回退到 label 当普通消息发送。
     // ⚠️ 绝不能落到 send(String(s)) —— 那会把对象串成 "[object Object]" 发给后端。
     if (s.label) {

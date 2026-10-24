@@ -8,6 +8,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 对话的**短期上下文**（2026-10-22 增量：Redis 会话记忆）。
@@ -47,8 +49,20 @@ public class SessionMemoryService {
     /** 单条文本上限，防止一条长回复把 key 撑大。 */
     private static final int MAX_TEXT = 500;
 
+    /** Redis 不可用时的进程内兜底上限（只存最近意图，不存原话，重启即清）。 */
+    private static final int FALLBACK_MAX = 2000;
+
     private final ObjectProvider<StringRedisTemplate> redisProvider;
     private final ObjectMapper objectMapper;
+
+    /**
+     * 进程内兜底：本机 / 演示环境没起 Redis 时，至少保证「连续两次澄清换话术」这类
+     * 单会话连贯性。只放意图与单号，不放用户原话，不进日志，进程重启即失效。
+     */
+    private final Map<String, FallbackContext> fallback = new ConcurrentHashMap<>();
+
+    private record FallbackContext(ChatIntent intent, String orderId, long expireAt) {
+    }
 
     public SessionMemoryService(ObjectProvider<StringRedisTemplate> redisProvider,
                                 ObjectMapper objectMapper) {
@@ -75,9 +89,11 @@ public class SessionMemoryService {
      */
     public void remember(String userId, String userText, ChatIntent intent,
                          String orderId, String replyText) {
-        if (isBlank(userId)) {
+        if (isBlank(userId) || intent == null || !memoryWorthy(intent)) {
             return;
         }
+        // 先写进程内兜底：Redis 正常时它只是冗余；Redis 不在时它就是唯一上下文。
+        rememberFallback(userId, intent, orderId);
         try {
             StringRedisTemplate redis = redisProvider.getIfAvailable();
             if (redis == null) {
@@ -111,11 +127,11 @@ public class SessionMemoryService {
         try {
             StringRedisTemplate redis = redisProvider.getIfAvailable();
             if (redis == null) {
-                return null;
+                return fallbackContext(userId);
             }
             List<String> rows = redis.opsForList().range(KEY_PREFIX + userId, -MAX_ENTRIES, -1);
             if (rows == null || rows.isEmpty()) {
-                return null;
+                return fallbackContext(userId);
             }
             // 从新到旧找：最近一条带业务意图的助手回复。
             for (int i = rows.size() - 1; i >= 0; i--) {
@@ -129,9 +145,29 @@ public class SessionMemoryService {
                 }
             }
         } catch (Exception ignored) {
-            // 同 remember：记忆坏了就当没有上下文。
+            // 同 remember：记忆坏了就退回进程内兜底。
         }
-        return null;
+        return fallbackContext(userId);
+    }
+
+    private void rememberFallback(String userId, ChatIntent intent, String orderId) {
+        long now = System.currentTimeMillis();
+        if (fallback.size() >= FALLBACK_MAX) {
+            fallback.entrySet().removeIf(e -> e.getValue().expireAt() <= now);
+        }
+        fallback.put(userId, new FallbackContext(intent, orderId, now + TTL.toMillis()));
+    }
+
+    private Context fallbackContext(String userId) {
+        FallbackContext cached = fallback.get(userId);
+        if (cached == null) {
+            return null;
+        }
+        if (cached.expireAt() <= System.currentTimeMillis()) {
+            fallback.remove(userId, cached);
+            return null;
+        }
+        return new Context(cached.intent(), cached.orderId());
     }
 
     /** 只接受有业务含义的意图；FAQ / 问候 / 兜底不能成为下一句的上下文。 */
@@ -140,7 +176,9 @@ public class SessionMemoryService {
                 || intent == ChatIntent.REFUND_QUERY
                 || intent == ChatIntent.OPEN_STORE
                 || intent == ChatIntent.ADD_TO_SECKILL
-                || intent == ChatIntent.IDENTITY_CLAIM;
+                || intent == ChatIntent.IDENTITY_CLAIM
+                // 连续澄清防复读：上一轮是 CLARIFY 时，下一轮要换话术。
+                || intent == ChatIntent.CLARIFY;
     }
 
     private static ChatIntent parse(String name) {
