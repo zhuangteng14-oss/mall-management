@@ -1,6 +1,6 @@
 t=2ms x=247 y=414 flightMs=800 overlay=false balls=1
-t=137ms x=247 y=402 flightMs=800 overlay=false balls=1
-t=276ms x=247 y=379 flightMs=800 overlay=false balls=1
-t=416ms x=247 y=361 flightMs=800 overlay=false balls=1
-t=557ms x=247 y=346 flightMs=800 overlay=false balls=1
-t=700ms x=247 y=334 flightMs=800 overlay=false balls=1
+t=139ms x=247 y=402 flightMs=800 overlay=false balls=1
+t=278ms x=247 y=381 flightMs=800 overlay=false balls=1
+t=419ms x=247 y=361 flightMs=800 overlay=false balls=1
+t=558ms x=247 y=346 flightMs=800 overlay=false balls=1
+t=683ms x=247 y=335 flightMs=800 overlay=false balls=1

@@ -3,7 +3,7 @@
 // 验的是用户点名的三句话 + 两条边界：
 //   ① 「怎么看我上架的商品」⇒ intent=GOODS_MANAGE，落 /merchant/user/list；
 //      回复只有引导语，**不含**「收藏的商品」这类幽灵前缀；
-//   ② 「怎么前往商家工作台」⇒ intent=MERCHANT_DASHBOARD，落 /merchant，不说「听不懂」；
+//   ② 「怎么前往商家工作台」⇒ intent=MERCHANT_DASHBOARD，落 /merchant/user，不说「听不懂」；
 //   ③ 「我花出去的钱去哪了」⇒ intent=ASSET_QUERY，落会员中心（余额 / 流水）；
 //   ④ 「今天天气不错」⇒ 相似度 < 0.75，intent=CLARIFY，反问而不硬猜；
 //   ⑤ 「直接带我去管理商品」⇒ 仍是 GOODS_MANAGE，但动作必须是 jump，点击不触发漫游。
@@ -181,10 +181,10 @@ try {
   await goHash('#/merchant')
   const dash = await sendChat('怎么前往商家工作台')
   const dashAction = dash.body?.action || null
-  ok('「怎么前往商家工作台」⇒ MERCHANT_DASHBOARD + /merchant',
+  ok('「怎么前往商家工作台」⇒ MERCHANT_DASHBOARD + /merchant/user',
     dash.done && dash.body?.intent === 'MERCHANT_DASHBOARD'
       && dashAction?.type === 'tour'
-      && dashAction?.targetPath === '/merchant',
+      && dashAction?.targetPath === '/merchant/user',
     { intent: dash.body?.intent, action: dashAction })
   ok('不再答「听不懂」', !String(dash.body?.reply || '').includes('听不懂'),
     { reply: String(dash.body?.reply || '').slice(0, 100) })

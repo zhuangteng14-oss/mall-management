@@ -9,7 +9,7 @@ PASS  点【跳过引导】⇒ 漫游消失（无 .tour-bar / .driver-active） 
 PASS  「直接带我去申请品牌」⇒ DIRECT 口令，给【一键直达】  {"intent":"OPEN_STORE","action":{"type":"jump","targetPath":"/customer/user/apply","targetLabel":"商家入驻申请","label":"一键直达"}}
 PASS  直达话术：已为您准备好直达入口，点击即可前往。  {"reply":"系统显示您当前是「入驻未通过」。原因：信息填写格式异常，不予通过。可以修改资料后重新提交，审核通过后账号自动升级为商家。已为您准备好直达入口，点击即可前往。"}
 PASS  【一键直达】胶囊可点（有实际尺寸）  {"x":1189.0390625,"y":627.375,"w":256.078125,"h":44}
-PASS  点【一键直达】⇒ 瞬间到申请页（≤ 3s，无逐步引导）  {"elapsed":354,"hash":"#/customer/user/apply"}
+PASS  点【一键直达】⇒ 瞬间到申请页（≤ 3s，无逐步引导）  {"elapsed":339,"hash":"#/customer/user/apply"}
 PASS  直达全程不触发漫游（1s 内无 .tour-bar / .driver-active）  {"bar":false,"driver":false}
 PASS  全程无 pageerror  []
 

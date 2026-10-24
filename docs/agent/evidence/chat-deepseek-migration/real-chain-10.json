@@ -1,0 +1,144 @@
+{
+  "summary": {
+    "runs": 10,
+    "http200": 10,
+    "intentMerchantDashboard": 10,
+    "targetMerchantUser": 10,
+    "llmTimeouts": 0,
+    "wallMsList": [
+      3,
+      8,
+      6,
+      8,
+      10,
+      5,
+      8,
+      11,
+      4,
+      9
+    ],
+    "pass": true
+  },
+  "rows": [
+    {
+      "n": 1,
+      "http": 200,
+      "wallMs": 3,
+      "intent": "MERCHANT_DASHBOARD",
+      "actionType": "tour",
+      "targetPath": "/merchant/user",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "llmLatencyMs": "-",
+      "llmTimeoutType": "-",
+      "llmFallback": "semantic_confident"
+    },
+    {
+      "n": 2,
+      "http": 200,
+      "wallMs": 8,
+      "intent": "MERCHANT_DASHBOARD",
+      "actionType": "tour",
+      "targetPath": "/merchant/user",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "llmLatencyMs": "-",
+      "llmTimeoutType": "-",
+      "llmFallback": "semantic_confident"
+    },
+    {
+      "n": 3,
+      "http": 200,
+      "wallMs": 6,
+      "intent": "MERCHANT_DASHBOARD",
+      "actionType": "tour",
+      "targetPath": "/merchant/user",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "llmLatencyMs": "-",
+      "llmTimeoutType": "-",
+      "llmFallback": "semantic_confident"
+    },
+    {
+      "n": 4,
+      "http": 200,
+      "wallMs": 8,
+      "intent": "MERCHANT_DASHBOARD",
+      "actionType": "tour",
+      "targetPath": "/merchant/user",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "llmLatencyMs": "-",
+      "llmTimeoutType": "-",
+      "llmFallback": "semantic_confident"
+    },
+    {
+      "n": 5,
+      "http": 200,
+      "wallMs": 10,
+      "intent": "MERCHANT_DASHBOARD",
+      "actionType": "tour",
+      "targetPath": "/merchant/user",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "llmLatencyMs": "-",
+      "llmTimeoutType": "-",
+      "llmFallback": "semantic_confident"
+    },
+    {
+      "n": 6,
+      "http": 200,
+      "wallMs": 5,
+      "intent": "MERCHANT_DASHBOARD",
+      "actionType": "tour",
+      "targetPath": "/merchant/user",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "llmLatencyMs": "-",
+      "llmTimeoutType": "-",
+      "llmFallback": "semantic_confident"
+    },
+    {
+      "n": 7,
+      "http": 200,
+      "wallMs": 8,
+      "intent": "MERCHANT_DASHBOARD",
+      "actionType": "tour",
+      "targetPath": "/merchant/user",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "llmLatencyMs": "-",
+      "llmTimeoutType": "-",
+      "llmFallback": "semantic_confident"
+    },
+    {
+      "n": 8,
+      "http": 200,
+      "wallMs": 11,
+      "intent": "MERCHANT_DASHBOARD",
+      "actionType": "tour",
+      "targetPath": "/merchant/user",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "llmLatencyMs": "-",
+      "llmTimeoutType": "-",
+      "llmFallback": "semantic_confident"
+    },
+    {
+      "n": 9,
+      "http": 200,
+      "wallMs": 4,
+      "intent": "MERCHANT_DASHBOARD",
+      "actionType": "tour",
+      "targetPath": "/merchant/user",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "llmLatencyMs": "-",
+      "llmTimeoutType": "-",
+      "llmFallback": "semantic_confident"
+    },
+    {
+      "n": 10,
+      "http": 200,
+      "wallMs": 9,
+      "intent": "MERCHANT_DASHBOARD",
+      "actionType": "tour",
+      "targetPath": "/merchant/user",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "llmLatencyMs": "-",
+      "llmTimeoutType": "-",
+      "llmFallback": "semantic_confident"
+    }
+  ]
+}

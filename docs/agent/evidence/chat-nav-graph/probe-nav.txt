@@ -13,7 +13,7 @@ PASS  「我想改一下那个 299 元耳机的价格」第 2 步：按图换页
 PASS  「我想改一下那个 299 元耳机的价格」第 3 步：到达 /merchant/user/list（.uc-main）  {"hit":true,"progress":"第 3 步 / 共 3 步","title":"已到达「查看商品」","hash":"#/merchant/user/list","expectHash":"#/merchant/user/list"}
 PASS  有评论的商家登录落 /merchant  {"hash":"#/merchant"}
 PASS  「我要看评论」⇒ COMMENT_QUERY（查真实评论，不返回 navigate）  {"intent":"COMMENT_QUERY","action":null}
-PASS  商家评论播报来自数据库：总数 / 最近一条 / 回复状态  {"total":10,"unanswered":4,"first":{"id":230,"kind":"question","kindLabel":"提问","goods":"无线蓝牙耳机 声谷标准版","rating":0,"content":"Q1 does the widget include a spare cable","createdAt":"2026-10-13 09:12:22","replyCount":3,"merchantReplied":true},"reply":"您店铺的商品共收到 10 条评论/提问，其中 4 条还没有商家回复。最近一条是提问：商品「无线蓝牙耳机 声谷标准版」「Q1 does the widget include a s…」，您已经回复过。平台没有独立的评价管理页，评论随商品详情展示。"}
+PASS  商家评论播报来自数据库：总数 / 最近一条 / 回复状态  {"total":10,"unanswered":4,"first":{"id":230,"kind":"question","kindLabel":"提问","goods":"无线蓝牙耳机 声谷标准版","rating":0,"content":"Q1 does the widget include a spare cable","createdAt":"2026-10-13 09:12:22","replyCount":3,"merchantReplied":true},"reply":"您店铺商品目前一共收到 10 条评论和提问，其中 4 条还没有商家回复。平台这边没有独立的评价管理页，评论是跟着商品详情一起展示的。最近三条里，无线蓝牙耳机 声谷标准版的那条提问已经有 3 条回复、您也回复过了；机械键盘 87 键 茶轴有一条 4 星评价、有 1 条回复但还没回复；同款耳机还有一条提问目前是 0 条回复"}
 PASS  「我要管理我的钱」→ /merchant/user/member（模型给 target_path，不给步骤）  {"intent":"ASSET_QUERY","action":{"type":"tour","targetPath":"/merchant/user/member","targetLabel":"会员中心","label":"开始引导"},"steps":null}
 PASS  「我要管理我的钱」回复如实说明：钱包  {"reply":"钱包余额和收支流水都在会员中心，我一步步带您过去。"}
 PASS  「我要管理我的钱」点按钮后仍停在 #/merchant，高亮真实入口  {"clicked":{"clicked":true,"label":"↗开始引导"},"hit":true,"progress":"第 1 步 / 共 3 步","title":"点击「用户中心」","hash":"#/merchant"}
@@ -31,8 +31,8 @@ PASS  「怎么处理退款」→ /customer/orders（模型给 target_path，不
 PASS  「怎么处理退款」点按钮后仍停在 #/customer，高亮真实入口  {"clicked":{"clicked":true,"label":"↗开始引导"},"hit":true,"progress":"第 1 步 / 共 3 步","title":"点击「用户中心」","hash":"#/customer"}
 PASS  「怎么处理退款」第 2 步：按图换页（[data-nav-to="/customer/orders"]）  {"hit":true,"progress":"第 2 步 / 共 3 步","title":"点击「我的订单」","hash":"#/customer/user","expectHash":null}
 PASS  「怎么处理退款」第 3 步：到达 /customer/orders（.ordermine-page）  {"hit":true,"progress":"第 3 步 / 共 3 步","title":"已到达「我的订单」","hash":"#/customer/orders","expectHash":"#/customer/orders"}
-PASS  客户「我要看评论」⇒ COMMENT_QUERY，按登录名查自己的评论  {"intent":"COMMENT_QUERY","total":1229,"first":{"id":74080,"kind":"review","kindLabel":"评价","goods":"（商品已下线）","rating":5,"content":"SIM-演练正文 *** 正正正正正正正正正正正正正正正正","createdAt":"2026-10-20 21:07:10","replyCount":0,"merchantReplied":false},"reply":"您一共发表过 1229 条评论/评价。最近一条是评价：商品「（商品已下线）」，5 星「SIM-演练正文 *** 正正正正正正正正正正正正正正正正」，商家还没有回复。平台没有独立的评价管理页，评论随商品详情展示。"}
-PASS  客户评论播报带真实条数与商家回复状态  {"reply":"您一共发表过 1229 条评论/评价。最近一条是评价：商品「（商品已下线）」，5 星「SIM-演练正文 *** 正正正正正正正正正正正正正正正正」，商家还没有回复。平台没有独立的评价管理页，评论随商品详情展示。"}
+PASS  客户「我要看评论」⇒ COMMENT_QUERY，按登录名查自己的评论  {"intent":"COMMENT_QUERY","total":1229,"first":{"id":74080,"kind":"review","kindLabel":"评价","goods":"（商品已下线）","rating":5,"content":"SIM-演练正文 *** 正正正正正正正正正正正正正正正正","createdAt":"2026-10-20 21:07:10","replyCount":0,"merchantReplied":false},"reply":"您一共发表过 1229 条评论，不过平台目前没有独立的评价管理页，评论是跟着商品详情展示的。最近三条都是 5 星评价，商品都已下线，内容为演练正文，每条有 0 条回复、商家暂未回复。我这边只能看到这三条，更多的评论需要到对应商品详情页里查看。"}
+PASS  客户评论播报带真实条数与商家回复状态  {"reply":"您一共发表过 1229 条评论，不过平台目前没有独立的评价管理页，评论是跟着商品详情展示的。最近三条都是 5 星评价，商品都已下线，内容为演练正文，每条有 0 条回复、商家暂未回复。我这边只能看到这三条，更多的评论需要到对应商品详情页里查看。"}
 PASS  页面无未捕获异常  {"pageErrors":[]}
 
 nav: 36/36 PASS
