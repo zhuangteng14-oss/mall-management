@@ -219,6 +219,48 @@ class LlmIntentClassifierTest {
     }
 
     @Test
+    @DisplayName("专用意图：GOODS_MANAGE 带 target_path ⇒ 解析保留，不再丢路径")
+    void keepsTargetPathForGoodsManage() throws IOException {
+        String url = serve(200, envelope(
+                "{\"intent\":\"GOODS_MANAGE\",\"target_path\":\"/merchant/user/list\",\"slots\":{}}"),
+                null, null);
+
+        LlmIntentClassifier.Result result = classifier(url, Duration.ofSeconds(3))
+                .classify("怎么看我上架的商品", 2, "/merchant");
+
+        assertThat(result.intent()).isEqualTo(ChatIntent.GOODS_MANAGE);
+        assertThat(result.targetPath()).isEqualTo("/merchant/user/list");
+    }
+
+    @Test
+    @DisplayName("专用意图：MERCHANT_DASHBOARD 带 target_path ⇒ 解析保留，不再丢路径")
+    void keepsTargetPathForMerchantDashboard() throws IOException {
+        String url = serve(200, envelope(
+                "{\"intent\":\"MERCHANT_DASHBOARD\",\"target_path\":\"/merchant/user\",\"slots\":{}}"),
+                null, null);
+
+        LlmIntentClassifier.Result result = classifier(url, Duration.ofSeconds(3))
+                .classify("怎么前往商家工作台", 2, "/merchant");
+
+        assertThat(result.intent()).isEqualTo(ChatIntent.MERCHANT_DASHBOARD);
+        assertThat(result.targetPath()).isEqualTo("/merchant/user");
+    }
+
+    @Test
+    @DisplayName("专用意图：ASSET_QUERY 带 target_path ⇒ 解析保留，不再丢路径")
+    void keepsTargetPathForAssetQuery() throws IOException {
+        String url = serve(200, envelope(
+                "{\"intent\":\"ASSET_QUERY\",\"target_path\":\"/merchant/user/member\",\"slots\":{}}"),
+                null, null);
+
+        LlmIntentClassifier.Result result = classifier(url, Duration.ofSeconds(3))
+                .classify("我要管理我的钱", 2, "/merchant");
+
+        assertThat(result.intent()).isEqualTo(ChatIntent.ASSET_QUERY);
+        assertThat(result.targetPath()).isEqualTo("/merchant/user/member");
+    }
+
+    @Test
     @DisplayName("工具挂载：COMMENT_QUERY 在白名单里；Prompt 的工具目录按角色动态拼装（商家看不到买家工具）")
     void commentQueryIsAllowedAndPromptHasToolCatalog() throws IOException {
         AtomicReference<String> body = new AtomicReference<>();
@@ -367,6 +409,20 @@ class LlmIntentClassifierTest {
         assertThatThrownBy(() -> classifier(url, Duration.ofSeconds(3)).classify("我要投诉"))
                 .isInstanceOf(LlmIntentClassifier.LlmException.class)
                 .hasMessageContaining("不支持的意图");
+    }
+
+    @Test
+    @DisplayName("Prompt 已列的 GREETING / HELP ⇒ 解析成功（白名单与 Prompt 同步）")
+    void acceptsSmallTalkIntents() throws IOException {
+        String greetingUrl = serve(200, envelope("{\"intent\":\"GREETING\",\"slots\":{}}"),
+                null, null);
+        assertThat(classifier(greetingUrl, Duration.ofSeconds(3)).classify("你好").intent())
+                .isEqualTo(ChatIntent.GREETING);
+
+        String helpUrl = serve(200, envelope("{\"intent\":\"HELP\",\"slots\":{}}"),
+                null, null);
+        assertThat(classifier(helpUrl, Duration.ofSeconds(3)).classify("你能做什么").intent())
+                .isEqualTo(ChatIntent.HELP);
     }
 
     @Test

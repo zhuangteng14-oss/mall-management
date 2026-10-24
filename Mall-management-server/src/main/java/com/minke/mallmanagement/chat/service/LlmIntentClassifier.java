@@ -61,7 +61,15 @@ public class LlmIntentClassifier {
             ChatIntent.DIRECT_NAVIGATION,
             // 旧协议：仍接受，解析后归一为 GUIDE_NAVIGATION。
             ChatIntent.NAVIGATE,
+            // 2026-10-24：纯 LLM（无语义路由）也要能产出这三个业务导航意图；
+            // 它们同时是 SemanticRouteRegistry 的标准问法意图。
+            ChatIntent.GOODS_MANAGE,
+            ChatIntent.MERCHANT_DASHBOARD,
+            ChatIntent.ASSET_QUERY,
             ChatIntent.FAQ,
+            // Prompt 已列出这两类寒暄；白名单必须同步，否则模型答对也被判成解析失败。
+            ChatIntent.GREETING,
+            ChatIntent.HELP,
             ChatIntent.UNKNOWN);
 
     /**
@@ -401,13 +409,24 @@ public class LlmIntentClassifier {
     }
 
     /**
-     * 解析 {@code target_path}：只对 NAVIGATE 生效，且必须能在当前角色的路由字典里归位。
+     * 解析 {@code target_path}：对导航意图与三个语义路由专用业务意图生效，
+     * 且必须能在当前角色的路由字典里归位。
+     *
+     * <p>这三个专用意图（{@code GOODS_MANAGE / MERCHANT_DASHBOARD / ASSET_QUERY}）
+     * 在语义路由命中时本就带路径；纯 LLM 路径下若模型也给出路径，必须原样解析 ——
+     * 否则 ALLOWED 放行了意图、路径却被丢掉，下游 {@code answerRouted} 会退化成
+     * 「这个页面在当前身份下打不开」。没给路径时仍返回 {@code null}，与旧行为一致。
      *
      * <p>数据类意图即使模型顺手给了路径也**丢掉** —— 否则「查订单」会被前端当成导航，
      * 把用户从订单卡旁边带走。
      */
     private static String parseTargetPath(JsonNode root, ChatIntent intent, Integer role) {
-        if (intent != ChatIntent.GUIDE_NAVIGATION && intent != ChatIntent.DIRECT_NAVIGATION) {
+        boolean navigational = intent == ChatIntent.GUIDE_NAVIGATION
+                || intent == ChatIntent.DIRECT_NAVIGATION;
+        boolean routed = intent == ChatIntent.GOODS_MANAGE
+                || intent == ChatIntent.MERCHANT_DASHBOARD
+                || intent == ChatIntent.ASSET_QUERY;
+        if (!navigational && !routed) {
             return null;
         }
         JsonNode node = root.get("target_path");
@@ -418,6 +437,10 @@ public class LlmIntentClassifier {
             node = root.path("slots").get("target_path");
         }
         String raw = node == null || node.isNull() ? "" : node.asText("").trim();
+        // 专用意图允许不带路径（语义路由正常时由路由层提供；纯 LLM 下模型可能只给意图）。
+        if (routed && raw.isEmpty()) {
+            return null;
+        }
         String resolved = RouteCatalog.resolve(raw, role);
         if (resolved == null) {
             throw new LlmException("target_path 不在路由字典内：" + raw);
