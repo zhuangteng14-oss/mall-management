@@ -607,8 +607,7 @@ class ChatAgentServiceTest {
 
         assertThat(resp.get("intent")).isEqualTo("FAQ");
         assertThat(String.valueOf(resp.get("reply")))
-                .isEqualTo("已拆封的商品，若不影响二次销售（吊牌、包装完整）可在 7 天内无理由退货；"
-                        + "如果是质量问题（比如东西坏了），拆封也可以退换，运费由商家承担。");
+                .isEqualTo("已拆封的商品，只要不影响二次销售（吊牌、包装完整），7 天内可以无理由退货。");
         verify(refundService, org.mockito.Mockito.never())
                 .myRefunds(anyString(), anyInt());
     }
@@ -619,7 +618,8 @@ class ChatAgentServiceTest {
         Map<String, Object> resp = service.ask("运费怎么算", "c1", 1);
 
         assertThat(resp.get("intent")).isEqualTo("FAQ");
-        assertThat(String.valueOf(resp.get("reply"))).isEqualTo("本店满99包邮，偏远地区除外。");
+        assertThat(String.valueOf(resp.get("reply")))
+                .isEqualTo("运费按订单金额算：满99元包邮；不满99元邮费由买家承担，偏远地区除外。");
     }
 
     @Test
@@ -733,8 +733,7 @@ class ChatAgentServiceTest {
 
         assertThat(resp.get("intent")).isEqualTo("FAQ");
         assertThat(String.valueOf(resp.get("reply")))
-                .isEqualTo("已拆封的商品，若不影响二次销售（吊牌、包装完整）可在 7 天内无理由退货；"
-                        + "如果是质量问题（比如东西坏了），拆封也可以退换，运费由商家承担。");
+                .isEqualTo("已拆封的商品，只要不影响二次销售（吊牌、包装完整），7 天内可以无理由退货。");
         verify(refundService, org.mockito.Mockito.never()).myRefunds(anyString(), anyInt());
     }
 

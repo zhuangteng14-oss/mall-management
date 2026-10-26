@@ -24,7 +24,7 @@ class FaqKnowledgeBaseTest {
 
         assertThat(answer).isNotNull();
         assertThat(answer.policy()).isTrue();
-        assertThat(answer.text()).contains("已拆封", "质量问题", "运费由商家承担");
+        assertThat(answer.text()).contains("已拆封", "不影响二次销售", "7 天");
     }
 
     @Test
@@ -34,7 +34,16 @@ class FaqKnowledgeBaseTest {
 
         assertThat(answer).isNotNull();
         assertThat(answer.policy()).isTrue();
-        assertThat(answer.text()).isEqualTo("本店满99包邮，偏远地区除外。");
+        assertThat(answer.text())
+                .isEqualTo("运费按订单金额算：满99元包邮；不满99元邮费由买家承担，偏远地区除外。");
+    }
+
+    @Test
+    @DisplayName("2026-10-26 拆细：吊牌 / 偏远 / 售后时效各答一个子问题")
+    void splitPolicies() {
+        assertThat(match("吊牌剪了还能退吗").text()).contains("吊牌", "影响二次销售");
+        assertThat(match("偏远地区包邮吗").text()).contains("偏远地区不包邮");
+        assertThat(match("售后多久回复").text()).contains("24 小时", "48 小时");
     }
 
     @Test
