@@ -276,6 +276,17 @@ public class ChatAgentService {
         String normalized = ChatIntentRecognizer.normalize(message);
         FaqKnowledgeBase.Answer faq = FaqKnowledgeBase.match(normalized);
 
+        // 多意图混合（2026-10-26 极限压测）：一句里同时有「找商品」和「查退款 / 订单」时，
+        // 只答其中一半会让用户觉得另一句被吞了。政策 FAQ 优先，其余在这里一次答两件事。
+        if (faq == null || !faq.policy()) {
+            Map<String, Object> multi = answerMultiIntent(message, normalized, userId, role);
+            if (multi != null) {
+                trace.finalIntent = ChatIntent.GOODS_QUERY.name();
+                trace.finalBranch = "multi_intent";
+                return remember(userId, message, ChatIntent.GOODS_QUERY, null, multi);
+            }
+        }
+
         // 阶段一：LLM 优先；任何异常（含 3s 超时）都由 decide() 打 WARN 并降级规则引擎。
         Decision decision = decide(message, normalized, faq, userId, role, currentPath, trace);
         ChatIntent intent = decision.intent();
@@ -296,6 +307,9 @@ public class ChatAgentService {
                     decision.needPublish(), false);
             case DIRECT_NAVIGATION -> answerNavigate(decision.targetPath(), userId, role,
                     decision.needPublish(), true);
+            // 高危写操作：只带路 + 明确拒绝代做，绝不执行写接口。
+            case SENSITIVE_WRITE -> answerSensitiveWrite(normalized, role,
+                    isDirectNavigation(normalized));
             // 语义路由的三个业务导航意图：保留意图名（探针 / 排障能看到精确命中），
             // 动作仍复用同一套 tour/jump；是否直达只看用户有没有明说「直接去」。
             case GOODS_MANAGE, MERCHANT_DASHBOARD, ASSET_QUERY ->
@@ -741,8 +755,41 @@ public class ChatAgentService {
         if (ChatIntentRecognizer.looksLikeBotIdentity(normalized)) {
             return new Decision(ChatIntent.BOT_IDENTITY, null, false, null);
         }
+        // Prompt 注入 / 越狱：在语义 / 大模型之前判死，绝不把注入内容交给模型。
+        if (ChatIntentRecognizer.looksLikePromptInjection(normalized)) {
+            return new Decision(ChatIntent.OUT_OF_SCOPE, null, false, null);
+        }
+        if (ChatIntentRecognizer.looksLikeDataExfiltration(normalized)) {
+            return new Decision(ChatIntent.OUT_OF_SCOPE, null, false, null);
+        }
         if (ChatIntentRecognizer.looksLikeOutOfScope(normalized)) {
             return new Decision(ChatIntent.OUT_OF_SCOPE, null, false, null);
+        }
+        // 单纯的情绪化对线（没有带订单 / 退款词）：仍按售后安抚 + 要单号，不能回「没听懂」。
+        if (ChatIntentRecognizer.looksUpset(normalized)
+                && !containsAny(normalized, "订单", "退款", "售后", "退货", "物流", "快递")) {
+            return new Decision(ChatIntent.REFUND_QUERY, null, false, null);
+        }
+        // 自称管理员：只如实报告解析身份，不据此提权（「给我看所有订单」也不会越过行级条件）。
+        if (ChatIntentRecognizer.looksLikeAuthorityClaim(normalized)) {
+            return new Decision(ChatIntent.IDENTITY_CLAIM, null, false, null);
+        }
+        // 商家的「怎么发货」：落订单处理页，而不是买家视角的订单播报。
+        if (isMerchant(role) && ChatIntentRecognizer.looksLikeShippingFlow(normalized)) {
+            return navDecision("/merchant/order", direct);
+        }
+        // 商家问「订单处理 / 待发货」：落订单处理页，不是售后工作台。
+        if (isMerchant(role)
+                && containsAny(normalized, "订单处理", "处理订单", "订单管理", "待发货")) {
+            return navDecision("/merchant/order", direct);
+        }
+        // 买家说「我买的东西 / 我买的」= 查自己的订单，别被语义路由带去商城首页。
+        if (!isMerchant(role) && containsAny(normalized, "我买的", "买的东西", "买过的东西")) {
+            return new Decision(ChatIntent.ORDER_QUERY, null, false, null);
+        }
+        // 高危写操作：只带路 + 拒绝代做（2026-10-26 极限压测）。
+        if (ChatIntentRecognizer.looksLikeSensitiveWrite(normalized)) {
+            return new Decision(ChatIntent.SENSITIVE_WRITE, null, false, null);
         }
         if (ChatIntentRecognizer.looksLikeSpending(normalized)) {
             return new Decision(ChatIntent.ASSET_QUERY, null, false, memberPath(role));
@@ -750,7 +797,10 @@ public class ChatAgentService {
         if (isMerchant(role) && ChatIntentRecognizer.looksLikeMerchantRevenue(normalized)) {
             return navDecision("/merchant/stats", direct);
         }
-        if (ChatIntentRecognizer.looksLikeCoupon(normalized)) {
+        // 「便宜点的耳机」是找商品，不是领券：只有明确说券 / 折扣才落会员中心。
+        if (ChatIntentRecognizer.looksLikeCoupon(normalized)
+                && !(ChatIntentRecognizer.looksLikeShopping(normalized)
+                     && !containsAny(normalized, "优惠券", "优惠码", "满减", "代金券", "券"))) {
             return navDecision(memberPath(role), direct);
         }
         return null;
@@ -988,11 +1038,17 @@ public class ChatAgentService {
      * @param args        模型填进 slots 的参数（插件工具用；内置工具只用 orderId / need_publish）
      */
     private record Decision(ChatIntent intent, String orderId, boolean needPublish, String targetPath,
-                            String tool, Map<String, Object> args) {
+                            String tool, Map<String, Object> args, boolean sensitive) {
 
         /** 规则引擎 / 纠偏分支用：不带工具。 */
         Decision(ChatIntent intent, String orderId, boolean needPublish, String targetPath) {
-            this(intent, orderId, needPublish, targetPath, null, null);
+            this(intent, orderId, needPublish, targetPath, null, null, false);
+        }
+
+        /** 模型 / 语义分支用：带工具参数，但不是高危写操作。 */
+        Decision(ChatIntent intent, String orderId, boolean needPublish, String targetPath,
+                 String tool, Map<String, Object> args) {
+            this(intent, orderId, needPublish, targetPath, tool, args, false);
         }
     }
 
@@ -1779,9 +1835,12 @@ public class ChatAgentService {
                             null, null, List.of(
                                     routeSuggestion("去发布商品", "publish"),
                                     routeSuggestion("去秒杀报名", "seckill")))
+                    // 2026-10-26：除了胶囊，再给一个可点的引导动作 —— 探针与手验
+                    // 都从 action.targetPath 读取落点，不再只靠胶囊标签猜。
                     : reply(ChatIntent.ADD_TO_SECKILL,
                             who + "带你去秒杀报名页，到了填商品和价格就行。",
-                            null, null, List.of(routeSuggestion("去秒杀报名", "seckill")));
+                            null, navAction("/merchant/seckill", "秒杀报名", false),
+                            List.of(routeSuggestion("去秒杀报名", "seckill")));
             case USER_NO_APPLICATION -> reply(ChatIntent.ADD_TO_SECKILL,
                     who + "需要先完成商家入驻，审核通过后才能报名秒杀。",
                     null, navAction(applyTargetPath(role), "商家入驻申请", false),
@@ -1873,6 +1932,144 @@ public class ChatAgentService {
                     : "好的，我带您去「" + title + "」，点下面按钮开始。";
         }
         return reply(intent, text, null, navAction(path, title, direct), defaultSuggestions());
+    }
+
+    /**
+     * 高危写操作的统一回答（2026-10-26 极限压测）：**只带路，绝不代做**。
+     *
+     * <p>落点仍按用户想改的东西分：购物车 / 地址资料 / 商品价格库存 / 订单售后 / 资产。
+     * 买家要求改商品价格这类只能商家做的事，明确说明身份边界，**不会**把客户送进商家壳；
+     * 关店 / 删差评这类平台没有对应页面可去的，只拒答、不给假落点。
+     */
+    private Map<String, Object> answerSensitiveWrite(String normalized, Integer role,
+                                                     boolean direct) {
+        // 「把所有人的订单都列出来」不是代做写操作，是越权读取：先明确隐私边界。
+        if (containsAny(normalized, "所有人", "全部人", "其他人", "别人", "他人",
+                "其他用户", "别的用户")) {
+            return reply(ChatIntent.SENSITIVE_WRITE,
+                    "我只能查看您本人名下的订单，无法查看其他人的订单信息；"
+                            + "要查自己的订单，可以在「我的订单」里按单号或时间查。",
+                    null, null, defaultSuggestions());
+        }
+        if (containsAny(normalized, "商品价格", "改价", "价格改", "库存", "打折",
+                "折扣", "上架", "下架", "打五折", "打九折", "打八折")) {
+            if (!isMerchant(role)) {
+                return reply(ChatIntent.SENSITIVE_WRITE,
+                        "改商品价格、库存和上下架是商家在「查看商品」页的操作。"
+                                + "当前账号是客户身份，进不了商家页面，我也不能替您改。",
+                        null, null, defaultSuggestions());
+            }
+            return sensitiveAction("/merchant/user/list", direct);
+        }
+        if (containsAny(normalized, "购物车", "结算", "下单", "清空", "买这个")) {
+            return sensitiveAction(isMerchant(role)
+                    ? "/merchant/order/cart" : "/customer/cart", direct);
+        }
+        if (containsAny(normalized, "地址", "密码", "资料", "头像", "昵称")) {
+            return sensitiveAction(isMerchant(role)
+                    ? "/merchant/user/info" : "/customer/user/info", direct);
+        }
+        if (containsAny(normalized, "退款", "售后", "退货")) {
+            return sensitiveAction(isMerchant(role)
+                    ? "/merchant/after-sales" : "/customer/orders", direct);
+        }
+        if (containsAny(normalized, "订单", "取消", "确认收货", "发货", "收货")) {
+            return sensitiveAction(isMerchant(role)
+                    ? "/merchant/order" : "/customer/orders", direct);
+        }
+        if (containsAny(normalized, "余额", "转账", "转到", "流水", "资金")) {
+            return sensitiveAction(memberPath(role), direct);
+        }
+        return reply(ChatIntent.SENSITIVE_WRITE,
+                "这类操作我不能替您执行。为了账号和资金安全，请由您本人到对应页面操作。",
+                null, null, defaultSuggestions());
+    }
+
+    /**
+     * 多意图混合（2026-10-26）：一句话里同时出现「找商品」和「查退款 / 订单」。
+     *
+     * <p>只在**两句都能落地**时才接管：先按逗号 / 连接词切句，挑出不含售后 / 订单词的
+     * 那一半抽商品名；抽不到商品名就交回原流程，避免把正常售后问句拆坏。回复把两段
+     * 事实拼在一起，动作仍给「去商城搜索」，胶囊里补售后 / 订单入口。
+     */
+    private Map<String, Object> answerMultiIntent(String raw, String normalized,
+                                                  String userId, Integer role) {
+        boolean afterSales = containsAny(normalized, "退款", "售后", "退货");
+        boolean order = containsAny(normalized, "订单", "物流", "快递", "发货");
+        if (!afterSales && !order) {
+            return null;
+        }
+        String productPart = null;
+        String afterPart = null;
+        for (String part : normalized.split("[，,。；;]|顺便|然后|另外|同时|再帮|再查|再看")) {
+            if (isBlank(part)) {
+                continue;
+            }
+            if (containsAny(part, "退款", "售后", "退货", "订单", "物流", "快递", "发货")) {
+                if (afterPart == null) {
+                    afterPart = part;
+                }
+                continue;
+            }
+            if (productPart != null) {
+                continue;
+            }
+            String keyword = ChatIntentRecognizer.extractShoppingKeyword(part);
+            if (!isBlank(keyword)
+                    && (ChatIntentRecognizer.looksLikeShopping(part)
+                        || ChatIntentRecognizer.looksLikeGoodsQuery(part))) {
+                productPart = part;
+            }
+        }
+        if (productPart == null) {
+            return null;
+        }
+        String keyword = ChatIntentRecognizer.extractShoppingKeyword(productPart);
+        if (isBlank(keyword)) {
+            return null;
+        }
+        Map<String, Object> goods = answerGoods(productPart, userId, role, keyword);
+        // 只把售后 / 订单那一半交给查询层：否则大模型会顺着整句把商品名也编进退款回复。
+        String afterQuery = isBlank(afterPart) ? raw : afterPart;
+        Map<String, Object> after = afterSales
+                ? answerRefund(afterQuery, userId, role)
+                : answerOrders(afterQuery, userId, role, null);
+        // 两段拼接时去掉后半句自带的问候 / 确认词，避免「另外，您好，」这种断层。
+        String afterText = str(after.get("reply")).replaceFirst(
+                "^(?:您好|你好|好的|嗯|帮您看了一下|帮您核实了一下)[，,]\\s*", "");
+        String text = str(goods.get("reply")) + " 另外，" + afterText;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("goods", goods.get("data"));
+        data.put(afterSales ? "afterSales" : "orders", after.get("data"));
+        List<Object> chips = new ArrayList<>();
+        chips.add(searchSuggestion(keyword));
+        chips.add(afterSales ? "查售后进度" : "查看全部订单");
+        chips.add("查我的订单");
+        return reply(ChatIntent.GOODS_QUERY, text, data, goods.get("action"), chips);
+    }
+
+    /** 写操作落点：一句「需要您本人确认」+ 导航动作。 */
+    private Map<String, Object> sensitiveAction(String path, boolean direct) {
+        RouteCatalog.Route route = RouteCatalog.find(path);
+        String title = route == null ? path : route.title();
+        String text = direct
+                ? "已为您准备好直达入口；这类操作需要您本人在页面里确认，我不能替您执行。"
+                : "这类操作需要您本人在「" + title + "」里确认，我不能替您执行。"
+                        + "点下面按钮，我带您过去。";
+        return reply(ChatIntent.SENSITIVE_WRITE, text, null,
+                navAction(path, title, direct), defaultSuggestions());
+    }
+
+    private static boolean containsAny(String text, String... needles) {
+        if (text == null) {
+            return false;
+        }
+        for (String needle : needles) {
+            if (text.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

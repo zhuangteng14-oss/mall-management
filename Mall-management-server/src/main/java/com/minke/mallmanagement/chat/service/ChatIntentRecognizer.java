@@ -41,6 +41,10 @@ public final class ChatIntentRecognizer {
     /** 隐式 token：至少 10 位字母数字，且必须同时含字母和数字（见类注释规则 2）。 */
     private static final Pattern IMPLICIT_TOKEN = Pattern.compile("[a-z0-9]{10,40}");
 
+    /** 带连字符的单号（SIM-BURST-70862-1328 / P0CANCEL-2026…-39），按整串查。 */
+    private static final Pattern HYPHEN_ORDER_NO =
+            Pattern.compile("[a-z][a-z0-9]*(?:-[a-z0-9]+){2,}");
+
     private static final Pattern REFUND = Pattern.compile(
             "售后|退款|退货|退钱|退单|退费|退款进度|退款到哪|什么时候退|钱.{0,6}(退|到账)");
 
@@ -108,8 +112,8 @@ public final class ChatIntentRecognizer {
     private static final Pattern SHOPPING_MARK = Pattern.compile(
             "在哪(?:里)?(?:买|购买|购)|哪里(?:买|购买)|怎么(?:买|购买)|如何(?:买|购买)|"
                     + "想(?:要)?买|要买|买个|买一个|买一件|买一台|买一双|买一只|购买|入手|"
-                    + "搜索|搜一下|搜|找一?个|找一下|帮我找|有没有(?:卖|货)|有卖|有货|有库存|"
-                    + "多少钱|什么价");
+                    + "搜索|搜一下|搜|找一?个|找一下|帮我找|有没有(?:卖|货)?|有卖|有货|有库存|"
+                    + "还有吗|还有没有|还有么|多少钱|什么价");
 
     /**
      * 明确的「找 / 买 / 搜」动作 —— 命中即给「去商城搜索」动作（而不只是商品卡）。
@@ -118,12 +122,13 @@ public final class ChatIntentRecognizer {
     private static final Pattern SEARCH_ACTION = Pattern.compile(
             "在哪(?:里)?(?:买|购买|购)|哪里(?:买|购买)|怎么(?:买|购买)|如何(?:买|购买)|"
                     + "购买|想(?:要)?买|要买|买个|买一个|买一件|买一台|买一双|买一只|买|入手|"
-                    + "搜索|搜一下|搜|找一?个|找一下|帮我找|有货|有库存|还有货");
+                    + "搜索|搜一下|搜|找一?个|找一下|帮我找|有货|有库存|还有货|"
+                    + "还有吗|还有没有|还有么");
 
     /** 动作触发词之后的花括号：优先长词，避免「买」抢在「购买」前面只吃到半截。 */
     private static final Pattern SHOPPING_AFTER = Pattern.compile(
             "(?:帮我找|搜索|搜一下|搜|查找|查一下|找一下|找一个|找个|想要买|想买|要买|"
-                    + "买一个|买一件|买一台|买一双|买一只|买个|购买|买|入手)"
+                    + "有没有(?:卖|货)?|买一个|买一件|买一台|买一双|买一只|买个|购买|买|入手)"
                     + "([\\u4e00-\\u9fa5a-z0-9:_-]{2,24})");
 
     /** 「商品名 + 在哪买 / 多少钱」：动作词在名词之后时，从名词一侧取。 */
@@ -156,13 +161,60 @@ public final class ChatIntentRecognizer {
 
     /** 与商城无关的请求：礼貌拒答，不暴露「没听懂」。 */
     private static final Pattern OUT_OF_SCOPE = Pattern.compile(
-            "讲个笑话|说个笑话|来个笑话|笑话|写(?:一段|一个|个|段)?(?:python|Python|PYTHON|"
-                    + "java|Java|代码|程序)|(?:python|Python|java|Java)代码|编程|写诗|作诗|"
-                    + "唱首歌|讲个故事|做数学题|翻译一下");
+            "讲个笑话|说个笑话|来个笑话|讲.{0,4}笑话|说.{0,4}笑话|笑话|"
+                    + "写(?:一段|一个|个|段)?(?:python|Python|PYTHON|"
+                    + "java|Java|代码|程序)|(?:python|Python|java|Java)代码|编程|"
+                    + "写.{0,6}诗|作诗|唱首歌|讲个故事|做数学题|翻译一下");
+
+    /**
+     * Prompt 注入 / 越狱（2026-10-26 极限压测）。
+     *
+     * <p>命中即按「与商城无关」拒答：**不进入语义 / 大模型**，也不执行任何被注入的
+     * 指令。这里只认显式的「忽略指令 / 系统提示词 / 越狱」词面，避免把正常说法判死。
+     */
+    private static final Pattern PROMPT_INJECTION = Pattern.compile(
+            "忽略.{0,8}(指令|提示|规则|设定)|无视.{0,8}(指令|提示|规则)|"
+                    + "ignore.{0,16}(instruction|prompt)|系统提示词|系统prompt|systemprompt|"
+                    + "你现在是(?:dan|开发者模式|管理员)|越狱|jailbreak");
+
+    /** 自称管理员 / 声称拥有管理员权限 —— 只用于如实报告解析身份，绝不据此提权。 */
+    private static final Pattern AUTHORITY_CLAIM = Pattern.compile(
+            "我是管理员|我有管理员权限|以管理员身份|管理员账号");
+
+    /**
+     * 商家的发货流程问法（2026-10-26）：{@code 发货} 本身是订单关键词，规则会先判成
+     * {@link ChatIntent#ORDER_QUERY}；商家问「怎么发货」要的是订单处理页，不是买家视角的
+     * 订单播报。
+     */
+    private static final Pattern SHIPPING_FLOW = Pattern.compile(
+            "怎么发货|如何发货|发货流程|在哪发货|哪里发货|我要发货|待发货.{0,6}(在哪|怎么)|"
+                    + "怎么寄|填写单号|上传单号");
+
+    /**
+     * 高危写操作（2026-10-26 极限压测）：**只能带路，不能代做**。
+     *
+     * <p>判据只认「祈使 + 具体动作」，不认「怎么改 / 如何取消」这类 how-to：
+     * 前者是要求系统代操作，后者是正常导航。命中后由
+     * {@code ChatAgentService.answerSensitiveWrite} 统一回「需要您本人确认」。
+     */
+    private static final Pattern SENSITIVE_WRITE = Pattern.compile(
+            "(?:帮我|给我|替我|直接|马上|立刻|现在就).{0,12}"
+                    + "(?:结算|付款|下单|清空|删除|删掉|删了|取消|确认收货|提交|"
+                    + "转账|转到|改成|改为|改到|修改|改价|改库存|关闭|关了|关店|"
+                    + "打折|打.{0,2}折|下架|退款|发货)"
+                    + "|把.{0,18}(?:改成|改为|改到|删了|删掉|清空|取消|下架|关了|"
+                    + "打.{0,2}折|价格.{0,4}改|库存.{0,4}改|所有.{0,4}订单)"
+                    + "|所有订单.{0,6}(?:取消|删除)|商品价格.{0,6}(?:改|设)|"
+                    + "库存.{0,6}(?:改|设)");
 
     /** 售后的情绪词：回复要先道歉，再给事实。 */
     private static final Pattern UPSET = Pattern.compile(
-            "死哪|人呢|到底什么时候|怎么还没|投诉|气死|催|等很久|等了很久|还不退|没人管");
+            "死哪|人呢|到底什么时候|怎么还没|投诉|气死|很生气|催|等很久|等了很久|等半天|"
+                    + "还不退|没人管|没人理|什么破|破服务|赶紧给我退");
+
+    /** 索要数据库 / 他人密码等数据外泄请求：明确拒答，绝不进模型。 */
+    private static final Pattern DATA_EXFIL = Pattern.compile(
+            "数据库|用户密码|密码告诉|所有人的密码|后台密码|管理员密码|泄露.{0,4}密码");
 
     /** 名词候选的截断点（出现即止，避免把整句后半段当商品名）。 */
     private static final List<String> NOUN_STOPS = List.of(
@@ -173,13 +225,14 @@ public final class ChatIntentRecognizer {
     /** 名词候选两端的口头语 / 量词 / 泛称。 */
     private static final List<String> NOUN_LEAD = List.of(
             "昨天看的", "前天看的", "刚才看的", "上次看的", "之前看的", "白天看的",
+            "便宜点的", "便宜一些的", "便宜的", "贵一点的", "贵点的", "实惠点的",
             "这个", "那个", "这款", "那款", "那双", "这双", "那件", "这件", "那条", "这条",
             "一款", "一个", "一件", "一双", "一台", "一只",
             "这", "那", "我", "想", "要", "个");
     private static final List<String> NOUN_TAIL = List.of(
             "这个商品", "这款商品", "的商品", "商品", "东西", "宝贝", "货品", "产品", "物品");
     private static final List<String> GENERIC_NOUNS = List.of(
-            "商品", "东西", "宝贝", "货品", "产品", "物品", "一下", "一个", "这个", "那个");
+            "商品", "东西", "宝贝", "货品", "产品", "物品", "玩意儿", "一下", "一个", "这个", "那个");
 
     /**
      * ⚠️ 「品牌申请 / 申请品牌 / 品牌入驻」也算开店（2026-10-22 交互纠偏）：
@@ -235,6 +288,9 @@ public final class ChatIntentRecognizer {
         if (REFUND.matcher(text).find()) {
             intent = ChatIntent.REFUND_QUERY;
         } else if (ORDER.matcher(text).find()) {
+            intent = ChatIntent.ORDER_QUERY;
+        } else if (found != null && (found.explicit() || found.value().length() >= 12)) {
+            // 用户贴了一串长单号（含连字符格式）：先按查单，别当成商品编号搜。
             intent = ChatIntent.ORDER_QUERY;
         } else if (COMMENT.matcher(text).find()) {
             intent = ChatIntent.COMMENT_QUERY;
@@ -404,9 +460,34 @@ public final class ChatIntentRecognizer {
         return normalized != null && OUT_OF_SCOPE.matcher(normalized).find();
     }
 
+    /** Prompt 注入 / 越狱（忽略指令 / 系统提示词 / 越狱）。 */
+    static boolean looksLikePromptInjection(String normalized) {
+        return normalized != null && PROMPT_INJECTION.matcher(normalized).find();
+    }
+
+    /** 自称管理员 / 声称拥有管理员权限。 */
+    static boolean looksLikeAuthorityClaim(String normalized) {
+        return normalized != null && AUTHORITY_CLAIM.matcher(normalized).find();
+    }
+
+    /** 商家问「怎么发货 / 发货流程」。 */
+    static boolean looksLikeShippingFlow(String normalized) {
+        return normalized != null && SHIPPING_FLOW.matcher(normalized).find();
+    }
+
+    /** 祈使式的高危写操作（结算 / 改价 / 改地址 / 取消订单 / 转账……）。 */
+    static boolean looksLikeSensitiveWrite(String normalized) {
+        return normalized != null && SENSITIVE_WRITE.matcher(normalized).find();
+    }
+
     /** 售后情绪词（死哪去了 / 到底什么时候退）。 */
     static boolean looksUpset(String normalized) {
         return normalized != null && UPSET.matcher(normalized).find();
+    }
+
+    /** 索要数据库 / 他人密码等数据外泄请求。 */
+    static boolean looksLikeDataExfiltration(String normalized) {
+        return normalized != null && DATA_EXFIL.matcher(normalized).find();
     }
 
     /**
@@ -504,6 +585,13 @@ public final class ChatIntentRecognizer {
         Matcher explicit = EXPLICIT_ORDER_NO.matcher(normalized);
         if (explicit.find()) {
             return new OrderNo(explicit.group(1), true);
+        }
+        Matcher hyphen = HYPHEN_ORDER_NO.matcher(normalized);
+        while (hyphen.find()) {
+            String token = hyphen.group();
+            if (hasDigit(token)) {
+                return new OrderNo(token, false);
+            }
         }
 
         List<String> candidates = new ArrayList<>();
