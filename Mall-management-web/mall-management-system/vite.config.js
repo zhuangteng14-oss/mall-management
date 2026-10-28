@@ -23,7 +23,7 @@ const API_SEGMENTS = [
   'user', 'goods', 'order', 'merchant', 'admin', 'message', 'comment', 'report',
   'sensitive', 'notification', 'favorite', 'cart', 'shop', 'catalog', 'template',
   'marketing', 'member', 'wallet', 'img', 'observe', 'health', 'stats', 'attack',
-  'demo-stream', 'seckill', 'subsidy', 'coupon', 'address', 'api',
+  'demo-stream', 'seckill', 'subsidy', 'coupon', 'address', 'api', 'chat',
 ]
 
 const proxy = Object.fromEntries(

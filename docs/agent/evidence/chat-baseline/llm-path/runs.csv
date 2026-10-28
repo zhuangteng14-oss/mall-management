@@ -1,0 +1,30 @@
+﻿group,sentence,run,role,http,wallMs,traceId,intent,semanticScore,secondScore,semanticConfident,llmUsed,llmFallbackReason,toolName,toolSuccess,totalLatencyMs,finalBranch,degradeReason,actionType,actionTarget,reply
+B,怎么看我上架的商品,1,2,200,3034,ae561063-6f10-4f6b-9c28-0c04f546886d,GUIDE_NAVIGATION,-,-,-,true,llm_error:LlmException,navigate,true,3026,tool:navigate,llm_failed,tour,/merchant/user/add,好的，我来一步步教您。点击下方按钮开始。
+B,怎么看我上架的商品,2,2,200,2293,590ad952-03b7-475a-9130-2e39aaded08e,GOODS_QUERY,-,-,-,true,none,query_goods,true,2289,tool:query_goods,none,,,请告诉我要查哪个商品：把商品名或编号发我（例如「oppo12」或「222:ij-555」），我帮你查价格、库存和在售状态。
+B,怎么看我上架的商品,3,2,200,1792,23e8434c-41e1-4748-ae08-58cb84184469,GOODS_QUERY,-,-,-,true,none,query_goods,true,1788,tool:query_goods,none,,,请告诉我要查哪个商品：把商品名或编号发我（例如「oppo12」或「222:ij-555」），我帮你查价格、库存和在售状态。
+B,怎么前往商家工作台,1,2,200,2651,ea7dc686-ab1b-4d67-bf53-552d6e299e37,GUIDE_NAVIGATION,-,-,-,true,none,navigate,true,2648,tool:navigate,none,tour,/merchant/after-sales,好的，我来一步步教您。点击下方按钮开始。
+B,怎么前往商家工作台,2,2,200,3027,5528a553-63d4-47be-853c-74d3e4c6969f,UNKNOWN,-,-,-,true,llm_error:LlmException,-,-,3021,switch:UNKNOWN,llm_failed,,,我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。
+B,怎么前往商家工作台,3,2,200,3015,081f7fb2-8b09-4206-b2fc-db29f985c200,UNKNOWN,-,-,-,true,llm_error:LlmException,-,-,3009,switch:UNKNOWN,llm_failed,,,我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。
+B,我花出去的钱去哪了,1,2,200,3018,4867d853-9b16-40c8-95f1-904c55eaedb2,UNKNOWN,-,-,-,true,llm_error:LlmException,-,-,3015,switch:UNKNOWN,llm_failed,,,我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。
+B,我花出去的钱去哪了,2,2,200,3017,b0a4426b-0f69-4bad-bd88-f5d830ce7c04,UNKNOWN,-,-,-,true,llm_error:LlmException,-,-,3012,switch:UNKNOWN,llm_failed,,,我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。
+B,我花出去的钱去哪了,3,2,200,3020,721c9bde-09e5-49b1-8428-da39a3e82092,UNKNOWN,-,-,-,true,llm_error:LlmException,-,-,3016,switch:UNKNOWN,llm_failed,,,我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。
+B,今天天气不错,1,2,200,3015,94f8d19e-a978-4045-b292-0c4265898bfa,UNKNOWN,-,-,-,true,llm_error:LlmException,-,-,3011,switch:UNKNOWN,llm_failed,,,我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。
+B,今天天气不错,2,2,200,1876,dc340e13-b4c2-4d2d-93d7-86dbbece3dbc,FAQ,-,-,-,true,none,-,-,1871,switch:FAQ,none,,,这类政策问题我还在学习中，建议联系店铺客服确认。
+B,今天天气不错,3,2,200,3016,8b9cc5d4-84af-4b7b-b374-5c7a808d0d4b,UNKNOWN,-,-,-,true,llm_error:LlmException,-,-,3013,switch:UNKNOWN,llm_failed,,,我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。
+B,怎么处理退款,1,2,200,3018,d2120426-0c29-4afc-b786-0374a2fd5d77,GUIDE_NAVIGATION,-,-,-,true,llm_error:LlmException,navigate,true,3016,tool:navigate,llm_failed,tour,/merchant/after-sales,好的，我来一步步教您。点击下方按钮开始。
+B,怎么处理退款,2,2,200,3012,377b06cd-fff6-4984-a96a-81b845154dd8,GUIDE_NAVIGATION,-,-,-,true,llm_error:LlmException,navigate,true,3007,tool:navigate,llm_failed,tour,/merchant/after-sales,好的，我来一步步教您。点击下方按钮开始。
+B,怎么处理退款,3,2,200,3016,69afa4db-cebe-4956-a2ac-667e25ee4913,GUIDE_NAVIGATION,-,-,-,true,llm_error:LlmException,navigate,true,3011,tool:navigate,llm_failed,tour,/merchant/after-sales,好的，我来一步步教您。点击下方按钮开始。
+B,我的退款进度,1,2,200,5821,eedc4508-3c83-4c87-8c9a-c094077a88d0,REFUND_QUERY,-,-,-,true,none,merchant_refunds,true,5821,tool:merchant_refunds,none,,,你店铺目前没有售后记录。
+B,我的退款进度,2,2,200,4015,708246ae-5354-45c7-a29c-76183ae85be2,REFUND_QUERY,-,-,-,true,llm_error:LlmException,merchant_refunds,true,4010,tool:merchant_refunds,llm_failed,,,您好，关于您的退款进度，目前暂时没有售后记录哦。
+B,我的退款进度,3,2,200,4416,121f50cd-8d8f-45bc-bbd5-ec4debe83db7,REFUND_QUERY,-,-,-,true,llm_error:LlmException,merchant_refunds,true,4408,tool:merchant_refunds,llm_failed,,,您好，您的退款申请目前还没有记录哦。
+B,直接带我去管理商品,1,2,200,3009,fb1fc934-5981-4a2a-9bfe-d83a4bd942e3,UNKNOWN,-,-,-,true,llm_error:LlmException,-,-,3004,switch:UNKNOWN,llm_failed,,,我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。
+B,直接带我去管理商品,2,2,200,3014,8a925efe-d270-42f3-89cc-da0a434f76b5,UNKNOWN,-,-,-,true,llm_error:LlmException,-,-,3011,switch:UNKNOWN,llm_failed,,,我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。
+B,直接带我去管理商品,3,2,200,3013,2cc60aa7-bd29-4957-b423-065470053010,UNKNOWN,-,-,-,true,llm_error:LlmException,-,-,3010,switch:UNKNOWN,llm_failed,,,我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。
+C,拆封了能退货吗,1,2,200,2,0e3a58dd-6fa6-4849-9928-0f6ad6639fb1,FAQ,-,-,-,false,policy_faq,-,-,0,switch:FAQ,none,,,支持7天无理由，但需保证不影响二次销售哦。
+C,运费怎么算,1,2,200,6,1a476248-4da0-4e6b-90c0-690bb187e3e0,FAQ,-,-,-,false,policy_faq,-,-,0,switch:FAQ,none,,,本店满99包邮，偏远地区除外。
+C,你好,1,2,200,3014,53c48ffe-985a-4a0c-9626-243e928e6262,GREETING,-,-,-,true,llm_error:LlmException,-,-,3009,switch:GREETING,llm_failed,,,你好呀～我可以帮你查订单、查售后进度，也能一键带你去开店。
+C,查我的订单,1,2,200,6039,3ca7d4d5-a7cd-46ff-a39f-4b684581aa54,ORDER_QUERY,-,-,-,true,llm_error:LlmException,merchant_orders,true,6032,tool:merchant_orders,llm_failed,,,你店铺最近有 8 笔订单，最新一笔是「drill（单号 DRILL-TEST-1792331236），实付 ¥10.00，下单时间 2026-10-18 13:47:16」。当前状态：已取消。
+C,我要看评论,1,2,200,6024,de5b273e-1ab2-43ff-aa69-8d5cadd4a79f,COMMENT_QUERY,-,-,-,true,llm_error:LlmException,merchant_comments,true,6017,tool:merchant_comments,llm_failed,,,您店铺的商品目前还没有收到评论或提问。买家确认收货后可以在商品详情里评价。
+C,222:ij-555,1,2,200,2003,1ca8f437-1b0c-464d-b489-259931eb3dd3,GOODS_QUERY,-,-,-,true,none,query_goods,true,2001,tool:query_goods,none,,,未找到商品「222:ij-555」。请核对商品名或编号后重试，也可以到商城搜索页按关键词搜索。
+C,我的退款进度,1,1,200,5640,54d99b7a-2026-47bd-a2eb-5c4af527ed09,REFUND_QUERY,-,-,-,true,llm_error:LlmException,buyer_refunds,true,5632,tool:buyer_refunds,llm_failed,,,您好，根据我们的系统记录，您目前没有售后退款记录哦。
+C,查我的订单,1,1,200,6036,f5d74b8c-40e8-4656-a011-e1d33e4e817c,ORDER_QUERY,-,-,-,true,llm_error:LlmException,buyer_orders,true,6029,tool:buyer_orders,llm_failed,,,你最近有 3708 笔订单，最新一笔是「Draft-B7-Demo（单号 BROR943184306407），实付 ¥155.84，下单时间 2026-10-20 21:18:47」。当前状态：已取消。

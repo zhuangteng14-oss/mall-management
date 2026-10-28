@@ -1,0 +1,28 @@
+PASS  P0-3 /login 上无客服球  {"hash":"#/login","ball":false}
+PASS  /customer 上出现客服球  {"hash":"#/customer","ball":true}
+PASS  面板打开
+PASS  客服回复带「最近有 N 笔」  {"replyText":"你最近有 3 笔订单，最新一笔是「无线蓝牙耳机 声谷标准版（单号 r2vfwK6z3E）」，实付 ¥299.00，下单时"}
+PASS  渲染最近 3 笔订单卡
+PASS  建议里有「查看全部订单」
+PASS  出现「一键带我去开店」
+PASS  跨页到申请页
+PASS  自动开启漫游 · 第 1 步高亮店铺名称  {"step1":"给店铺起个名字"}
+PASS  第 1 步落点是 #tour-shop-name  {"hl1":"tour-shop-name"}
+PASS  第 2 步高亮提交按钮  {"step2":"提交入驻申请","hl2":"tour-submit"}
+PASS  二次进入：欢迎胶囊仍在
+PASS  二次进入：再次出现「一键带我去开店」
+PASS  二次进入：漫游重新开启且停在第 1 步  {"reStep":"给店铺起个名字"}
+PASS  6 态话术：匿名  {"text":"您当前还未登录。"}
+PASS  6 态话术：无申请  {"text":"系统显示您当前是普通客户，还没有提交过入驻申请。"}
+PASS  6 态话术：审核中  {"text":"系统显示您当前是「入驻审核中」。店铺「米可数码店」于 2026-"}
+PASS  6 态话术：未通过  {"text":"系统显示您当前是「入驻未通过」。原因：资料不全。"}
+PASS  6 态话术：商家  {"text":"系统显示您当前是商家。商家号：m1。"}
+PASS  6 态话术：品牌  {"text":"系统显示您当前是品牌商家。品牌：米可，有效期至 2099-01-"}
+PASS  N7 未知 routeKey：胶囊出现
+PASS  N7 未知 routeKey：点击后按 label 发消息
+PASS  N7 未知 routeKey：消息区不出现 [object Object]
+PASS  商家身份进入商家端  {"merchantHome":"#/merchant"}
+PASS  N3 秒杀：商家看到「去秒杀报名」
+PASS  N3 秒杀：导航到 /merchant/seckill  {"hash":"#/merchant/seckill"}
+
+26/26 PASS

@@ -16,9 +16,9 @@
         <h1>个人中心</h1>
       </div>
       <div class="head-actions">
-        <router-link class="btn solid" :to="cartPath">打开购物车 <span class="mono">{{ cartCount === null ? '—' : pad2(cartCount) }}</span></router-link>
-        <router-link v-if="isMerchantShell" class="btn" to="/merchant/after-sales">售后工作台</router-link>
-        <router-link v-else class="btn" :to="applyPath">商家入驻申请</router-link>
+        <router-link class="btn solid" :to="cartPath" :data-nav-to="cartPath">打开购物车 <span class="mono">{{ cartCount === null ? '—' : pad2(cartCount) }}</span></router-link>
+        <router-link v-if="isMerchantShell" class="btn" to="/merchant/after-sales" data-nav-to="/merchant/after-sales">售后工作台</router-link>
+        <router-link v-else class="btn" :to="applyPath" :data-nav-to="applyPath">商家入驻申请</router-link>
         <button class="btn" @click="editOpen = true">编辑资料</button>
       </div>
     </section>
@@ -60,7 +60,7 @@
         <p>品牌是商家之上的进一步认证。加盟通过后，商品进入品牌专区、商品卡带品牌标，并可参加品牌专属活动。这是商家工作台首页的固定入口，不需要翻资质页。</p>
       </div>
       <div class="cta-side">
-        <router-link class="btn" :to="{ path: applyPath, query: { type: 'brand' } }">申请品牌加盟</router-link>
+        <router-link class="btn" :to="{ path: applyPath, query: { type: 'brand' } }" :data-nav-to="applyPath">申请品牌加盟</router-link>
         <router-link class="btn" :to="{ path: applyPath, query: { type: 'brand', drawer: 'brand-help' } }">先看加盟说明</router-link>
         <small>当前状态：{{ brandLabel }}<br>审核 1–3 个工作日 · 不影响商家身份</small>
       </div>
@@ -82,7 +82,7 @@
 
     <!-- 双身份桥（A `bridge`） -->
     <section class="bridge" aria-label="双身份切换">
-      <router-link class="bridge-side" :class="{ active: !isMerchantShell }" :to="selfPath">
+      <router-link class="bridge-side" :class="{ active: !isMerchantShell }" :to="selfPath" :data-nav-to="selfPath">
         <span class="b-kicker">BUYER / 基础身份 · 常驻</span>
         <strong>买家</strong>
         <dl>
@@ -127,7 +127,7 @@
 
     <!-- 买家资产入口（A `entry-grid`） -->
     <div class="entry-grid section-gap" aria-label="买家资产入口">
-      <router-link class="entry-cell entry-link" :to="favoritesPath" title="打开我的收藏（真端点 /favorite/list）">
+      <router-link class="entry-cell entry-link" :to="favoritesPath" :data-nav-to="favoritesPath" title="打开我的收藏（真端点 /favorite/list）">
         <span class="ek">01 / FAVORITES</span><b>我的收藏</b><span class="ev">{{ favCount === null ? '—' : favCount }}</span>
         <small>看中的器物，先放进收藏夹</small><span class="ego">查看收藏 →</span>
       </router-link>
@@ -177,7 +177,7 @@
               <span class="name">{{ userInfo.username || '未知用户' }}</span>
               <div class="barcode" aria-hidden="true"><i v-for="n in 22" :key="n" :style="barcodeStyle(n)"></i></div>
               <button class="plaque-link" @click="editOpen = true">编辑资料 →</button>
-              <router-link class="plaque-link" :to="memberPath">进入会员中心 →</router-link>
+              <router-link class="plaque-link" :to="memberPath" :data-nav-to="memberPath">进入会员中心 →</router-link>
             </div>
           </div>
         </section>
@@ -325,14 +325,14 @@
     <!-- 四格快捷入口（A `shortcut-grid`） -->
     <section class="section-gap">
       <div class="shortcut-grid">
-        <router-link class="shortcut" :to="myOrdersPath"><span class="s-no">01 / ORDERS</span><strong>我的订单</strong><small>按状态筛选，查看每单的流程节点与售后进度。</small><span class="s-go">查看订单 →</span></router-link>
-        <router-link class="shortcut" :to="historyPath"><span class="s-no">02 / HISTORY</span><strong>历史购买记录</strong><small>{{ recentOrders.length }} 笔已完成订单，支持再次购买。</small><span class="s-go">查看记录 →</span></router-link>
-        <router-link class="shortcut" :to="friendPath"><span class="s-no">03 / MESSAGES</span><strong>好友 / 消息</strong><small>打开好友与私信，继续沟通。</small><span class="s-go">打开消息 →</span></router-link>
-        <router-link v-if="isMerchantShell" class="shortcut" :to="orderCenterPath"><span class="s-no">04 / SHIP</span><strong>商家订单处理</strong><small>进入订单中心处理发货与售后。</small><span class="s-go">去发货 →</span></router-link>
-        <router-link v-else class="shortcut" :to="applyPath"><span class="s-no">04 / MERCHANT</span><strong>商家入驻申请</strong><small>提交表单，审核通过后解锁工作台。</small><span class="s-go">去申请 →</span></router-link>
-        <router-link v-if="isMerchantShell" class="shortcut" :to="addGoodsPath"><span class="s-no">05 / LISTING</span><strong>上架商品</strong><small>新建商品、保存草稿并提交审核。</small><span class="s-go">去上架 →</span></router-link>
-        <router-link v-if="isMerchantShell" class="shortcut" :to="listGoodsPath"><span class="s-no">06 / CATALOG</span><strong>查看商品</strong><small>管理在售、待审与驳回商品及 SKU。</small><span class="s-go">查看商品 →</span></router-link>
-        <router-link v-if="isMerchantShell" class="shortcut" :to="statsPath"><span class="s-no">07 / STATS</span><strong>经营数据</strong><small>查看销售、订单与库存的经营看板。</small><span class="s-go">查看数据 →</span></router-link>
+        <router-link class="shortcut" :to="myOrdersPath" :data-nav-to="myOrdersPath"><span class="s-no">01 / ORDERS</span><strong>我的订单</strong><small>按状态筛选，查看每单的流程节点与售后进度。</small><span class="s-go">查看订单 →</span></router-link>
+        <router-link class="shortcut" :to="historyPath" :data-nav-to="historyPath"><span class="s-no">02 / HISTORY</span><strong>历史购买记录</strong><small>{{ recentOrders.length }} 笔已完成订单，支持再次购买。</small><span class="s-go">查看记录 →</span></router-link>
+        <router-link class="shortcut" :to="friendPath" :data-nav-to="friendPath"><span class="s-no">03 / MESSAGES</span><strong>好友 / 消息</strong><small>打开好友与私信，继续沟通。</small><span class="s-go">打开消息 →</span></router-link>
+        <router-link v-if="isMerchantShell" class="shortcut" :to="orderCenterPath" :data-nav-to="orderCenterPath"><span class="s-no">04 / SHIP</span><strong>商家订单处理</strong><small>进入订单中心处理发货与售后。</small><span class="s-go">去发货 →</span></router-link>
+        <router-link v-else class="shortcut" :to="applyPath" :data-nav-to="applyPath"><span class="s-no">04 / MERCHANT</span><strong>商家入驻申请</strong><small>提交表单，审核通过后解锁工作台。</small><span class="s-go">去申请 →</span></router-link>
+        <router-link id="tour-menu-add" v-if="isMerchantShell" class="shortcut" :to="addGoodsPath" :data-nav-to="addGoodsPath"><span class="s-no">05 / LISTING</span><strong>上架商品</strong><small>新建商品、保存草稿并提交审核。</small><span class="s-go">去上架 →</span></router-link>
+        <router-link v-if="isMerchantShell" class="shortcut" :to="listGoodsPath" :data-nav-to="listGoodsPath"><span class="s-no">06 / CATALOG</span><strong>查看商品</strong><small>管理在售、待审与驳回商品及 SKU。</small><span class="s-go">查看商品 →</span></router-link>
+        <router-link v-if="isMerchantShell" class="shortcut" :to="statsPath" :data-nav-to="statsPath"><span class="s-no">07 / STATS</span><strong>经营数据</strong><small>查看销售、订单与库存的经营看板。</small><span class="s-go">查看数据 →</span></router-link>
       </div>
     </section>
 

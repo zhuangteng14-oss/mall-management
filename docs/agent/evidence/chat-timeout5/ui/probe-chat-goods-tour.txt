@@ -1,0 +1,12 @@
+PASS  回复不含店铺号 5N1k5K2guh  "为您查到商品「oppo12」，当前售价 ¥1886.00，库存充足，分类 电子用品，正在热卖中。您可以点击下方按钮，我直接带您去详情页看看。"
+PASS  回复不含内部编号 OP2  "为您查到商品「oppo12」，当前售价 ¥1886.00，库存充足，分类 电子用品，正在热卖中。您可以点击下方按钮，我直接带您去详情页看看。"
+PASS  回复含库存话术  "为您查到商品「oppo12」，当前售价 ¥1886.00，库存充足，分类 电子用品，正在热卖中。您可以点击下方按钮，我直接带您去详情页看看。"
+PASS  回复下方有「带我去商品详情」胶囊  undefined
+PASS  打开面板第一帧已贴底  [{"top":13,"h":419,"sh":432},{"top":13,"h":419,"sh":432},{"top":13,"h":419,"sh":432}]
+PASS  历史不重放打字机（无 caret）  0
+PASS  胶囊可点（真鼠标）  undefined
+PASS  第 1 步高亮顶栏搜索框  {"t1":"① 在搜索框里输入「oppo12」","step":"第 1 步 / 共 4 步"}
+PASS  第 2 步高亮搜索按钮  "② 点「搜索」"
+PASS  第 3 步落在搜索结果页并高亮商品卡片  {"hashSearch":"#/customer/search?kw=oppo12","t3":"③ 点开「oppo12」的商品卡片"}
+PASS  第 4 步到达商品详情页（且是 oppo12 本尊）  {"hashDetail":"#/product?Id=121&MerchantId=5N1k5K2guh&GoodName=oppo12&Price=1886&GoodImg=http://localhost:8088/img/%E8%89%B2%E6%AC%BE.jpg&GoodType=%E7%94%B5%E5%AD%90%E7%94%A8%E5%93%81&ProductCode=OP2&from=search","t4":"④ 已到达商品详情页"}
+PASS  详情页真实渲染（有详情容器）  undefined

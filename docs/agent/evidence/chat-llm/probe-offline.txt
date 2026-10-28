@@ -1,0 +1,6 @@
+PASS  商家登录落 /merchant  ""
+PASS  断网降级：同句仍返回业务回复（不 500 / 不挂起）  {"elapsedMs":205,"reply":"系统显示您当前是品牌商家。品牌：Chenguang-Brand-Store，长期有效。商品还没上架。先在「上架商品」发布商品，再回秒杀报名页选它；两个入口都在下"}
+PASS  断网降级：规则引擎路径（回「带你去秒杀报名页」）  {"elapsedMs":216,"reply":"系统显示您当前是品牌商家。品牌：Chenguang-Brand-Store，长期有效。带你去秒杀报名页，到了填商品和价格就行。"}
+PASS  断网降级：只剩一枚「去秒杀报名」胶囊（无 need_publish 槽位）  {"chips":["去秒杀报名→"]}
+
+offline: 4/4 PASS

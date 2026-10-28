@@ -1,0 +1,1 @@
+2026-10-24 14:23:15.623  INFO 70280 --- [main] [] c.m.m.chat.tool.ToolRegistry             : AgentTool 扫描完成：10 个方法 → 10 个工具 [merchant_refunds, buyer_comments, buyer_refunds, merchant_comments, merchant_orders, open_store, query_goods, navigate, buyer_orders, seckill_signup]

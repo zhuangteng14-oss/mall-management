@@ -5,8 +5,8 @@
    父级：display:grid + 固定 4 列 + 200px 基础行高 + 16px gap；
    卡片：按 `config/mosaic.js` 的 8 件循环分配 2×2 / 2×1 / 1×2 / 1×1。
    ⚠️ 卡片内部（`.pcard-*`）属于 `ProductCard.vue` 的 scoped 样式；本文件是全局表，
-      选择器带 `.mosaic-grid > .pcard` 前缀，specificity 高于 scoped 的
-      `.pcard-img[data-v-…]`，因此能覆盖它的 4/3 定高而不用 `!important`。
+      根节点规则写 `.pcard.pcard`：它与 scoped `.pcard[data-v-…]` 同为 (0,2,0)，Vite 下
+      scoped 后注入会赢（Vue CLI 下顺序相反）⇒ 双类名 (0,3,0) 与加载顺序无关；`.m-wide` 同理并到 (0,4,0)。
    ══════════════════════════════════════════════════════════════════════════ */
 
 .mosaic-grid {
@@ -19,7 +19,7 @@
 }
 
 /* 卡片填满自己的网格区域 */
-.mosaic-grid > .pcard {
+.mosaic-grid > .pcard.pcard {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -30,7 +30,7 @@
   box-shadow: none;
   transition: transform 0.28s ease, box-shadow 0.28s ease, border-color 0.2s ease;
 }
-.mosaic-grid > .pcard:hover {
+.mosaic-grid > .pcard.pcard:hover {
   border-color: var(--brand-ink);
   transform: translateY(-3px);
   box-shadow: 0 18px 40px rgba(39, 94, 78, 0.16);
@@ -66,7 +66,7 @@
 .mosaic-grid > .m-big .pcard-price .int { font-size: 30px; }
 
 /* 宽幅横图：图左文右，图占满整格高度（200px），适合场景图 */
-.mosaic-grid > .m-wide { flex-direction: row; }
+.mosaic-grid > .pcard.pcard.m-wide { flex-direction: row; }
 .mosaic-grid > .m-wide .pcard-img { flex: 1 1 58%; height: 100%; }
 .mosaic-grid > .m-wide .pcard-tx {
   flex: 1 1 42%;
@@ -101,7 +101,7 @@
     grid-auto-rows: auto;
     gap: 14px;
   }
-  .mosaic-grid > .pcard {
+  .mosaic-grid > .pcard.pcard {
     grid-column: 1 / -1;
     grid-row: auto;
     height: auto;
@@ -110,7 +110,7 @@
     flex: none;
     aspect-ratio: 4 / 3;
   }
-  .mosaic-grid > .m-wide { flex-direction: column; }
+  .mosaic-grid > .pcard.pcard.m-wide { flex-direction: column; }
   .mosaic-grid > .m-wide .pcard-img { flex: none; width: 100%; height: auto; }
   .mosaic-grid > .m-wide .pcard-tx { flex: 0 0 auto; }
   .mosaic-grid > .m-wide .pcard-name { -webkit-line-clamp: 2; min-height: 2.9em; }
@@ -122,6 +122,6 @@
   .mosaic-grid > .pcard .pcard-img img {
     transition: none;
   }
-  .mosaic-grid > .pcard:hover { transform: none; }
+  .mosaic-grid > .pcard.pcard:hover { transform: none; }
   .mosaic-grid > .pcard:hover .pcard-img img { transform: none; }
 }

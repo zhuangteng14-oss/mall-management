@@ -326,7 +326,7 @@ const noteOf = (order) => (isHistory(order)
   ? `结单日期 ${formatDateTime(order.SettlementDate) || '—'}`
   : activeNote(order))
 
-// 已完成单的只读售后态（批四第二批 commit 4）；0 = 没申请过 ⇒ 不画 chip。
+// 已完成单的只读售后态（批四第二批 commit 4）；0 = 没申请过 ⇒ 不画 chip。⚠️ 文案与后端 order/RefundStatusText 必须同步。
 const REFUND_TEXT = { 1: '待商家审核', 2: '商家已拒绝', 3: '平台处理中', 4: '平台已拒绝', 5: '已退款' }
 const refundText = (order) => REFUND_TEXT[Number(order.RefundStatus) || 0] || ''
 

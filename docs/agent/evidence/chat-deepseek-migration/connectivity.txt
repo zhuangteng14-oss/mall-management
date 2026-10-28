@@ -1,0 +1,9 @@
+== DeepSeek /models ==
+http 200
+models ['deepseek-flash', 'deepseek-v4-pro']
+deepseek-flash_present True
+== SiliconFlow /v1/embeddings ==
+http 200
+count 1
+dim 1024
+model BAAI/bge-m3

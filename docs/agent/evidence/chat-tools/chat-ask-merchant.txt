@@ -1,0 +1,13 @@
+问：我要看评论
+  intent=COMMENT_QUERY success=True
+  reply=您好，您的店铺商品目前还没有收到任何评论或提问哦。评论都是直接在商品详情页展示的，目前还没有新的评论信息。
+  data={"scope": "merchant", "total": 0, "unanswered": 0}
+
+问：我的订单到哪了
+  intent=ORDER_QUERY success=True
+  reply=您好，您最近有3笔订单，其中一笔订单号为STLL57875548，商品是oppo12，金额是1888元，目前状态是已付款待发货哦。其他的两笔订单都已经取消了。
+  data={"total": 8}
+
+问：我的退款进度
+  intent=REFUND_QUERY success=True
+  reply=您您好，关于您的退款进度，目前没有售后记录哦。

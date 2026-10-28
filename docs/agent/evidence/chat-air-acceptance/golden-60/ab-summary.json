@@ -1,0 +1,199 @@
+{
+  "n": 60,
+  "runs_per_item": 3,
+  "duplicates_retained": true,
+  "flash": {
+    "intent": {
+      "ok": 40,
+      "n": 60,
+      "rate": 0.6667
+    },
+    "tool": {
+      "ok": 41,
+      "n": 60,
+      "rate": 0.6833
+    },
+    "target_all": {
+      "ok": 42,
+      "n": 60,
+      "rate": 0.7
+    },
+    "target_navigate": {
+      "ok": 16,
+      "n": 34,
+      "rate": 0.4706
+    },
+    "attempts": {
+      "intent": {
+        "ok": 121,
+        "n": 180,
+        "rate": 0.6722
+      },
+      "tool": {
+        "ok": 120,
+        "n": 180,
+        "rate": 0.6667
+      },
+      "target_all": {
+        "ok": 127,
+        "n": 180,
+        "rate": 0.7056
+      },
+      "target_navigate": {
+        "ok": 50,
+        "n": 102,
+        "rate": 0.4902
+      }
+    },
+    "json_syntax_attempts": {
+      "ok": 93,
+      "n": 180,
+      "rate": 0.5167
+    },
+    "json_valid_attempts": {
+      "ok": 177,
+      "n": 180,
+      "rate": 0.9833
+    },
+    "json_valid_items_all": {
+      "ok": 59,
+      "n": 60,
+      "rate": 0.9833
+    },
+    "production_parse_attempts": {
+      "ok": 177,
+      "n": 180,
+      "rate": 0.9833
+    },
+    "production_parse_items_all": {
+      "ok": 59,
+      "n": 60,
+      "rate": 0.9833
+    },
+    "fenced_attempts": 84,
+    "call_errors": 0
+  },
+  "air": {
+    "intent": {
+      "ok": 45,
+      "n": 60,
+      "rate": 0.75
+    },
+    "tool": {
+      "ok": 47,
+      "n": 60,
+      "rate": 0.7833
+    },
+    "target_all": {
+      "ok": 49,
+      "n": 60,
+      "rate": 0.8167
+    },
+    "target_navigate": {
+      "ok": 27,
+      "n": 34,
+      "rate": 0.7941
+    },
+    "attempts": {
+      "intent": {
+        "ok": 134,
+        "n": 180,
+        "rate": 0.7444
+      },
+      "tool": {
+        "ok": 142,
+        "n": 180,
+        "rate": 0.7889
+      },
+      "target_all": {
+        "ok": 147,
+        "n": 180,
+        "rate": 0.8167
+      },
+      "target_navigate": {
+        "ok": 81,
+        "n": 102,
+        "rate": 0.7941
+      }
+    },
+    "json_syntax_attempts": {
+      "ok": 116,
+      "n": 180,
+      "rate": 0.6444
+    },
+    "json_valid_attempts": {
+      "ok": 153,
+      "n": 180,
+      "rate": 0.85
+    },
+    "json_valid_items_all": {
+      "ok": 51,
+      "n": 60,
+      "rate": 0.85
+    },
+    "production_parse_attempts": {
+      "ok": 153,
+      "n": 180,
+      "rate": 0.85
+    },
+    "production_parse_items_all": {
+      "ok": 51,
+      "n": 60,
+      "rate": 0.85
+    },
+    "fenced_attempts": 37,
+    "call_errors": 9
+  },
+  "agreement": {
+    "intent": 0.5333,
+    "tool": 0.6333,
+    "target": 0.6667
+  },
+  "unique_n": 56,
+  "unique": {
+    "flash": {
+      "intent": {
+        "ok": 38,
+        "n": 56,
+        "rate": 0.6786
+      },
+      "tool": {
+        "ok": 38,
+        "n": 56,
+        "rate": 0.6786
+      },
+      "target_all": {
+        "ok": 41,
+        "n": 56,
+        "rate": 0.7321
+      },
+      "target_navigate": {
+        "ok": 16,
+        "n": 31,
+        "rate": 0.5161
+      }
+    },
+    "air": {
+      "intent": {
+        "ok": 45,
+        "n": 56,
+        "rate": 0.8036
+      },
+      "tool": {
+        "ok": 46,
+        "n": 56,
+        "rate": 0.8214
+      },
+      "target_all": {
+        "ok": 48,
+        "n": 56,
+        "rate": 0.8571
+      },
+      "target_navigate": {
+        "ok": 27,
+        "n": 31,
+        "rate": 0.871
+      }
+    }
+  }
+}

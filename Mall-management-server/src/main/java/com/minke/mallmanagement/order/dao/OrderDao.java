@@ -810,4 +810,72 @@ public class OrderDao {
                 return null;
         }
     }
+
+    // ==================== 读：智能客服（chat 域，只读） ====================
+
+    /**
+     * 客服：某客户最近的订单（含已完成 / 已取消），按下单时间倒序。
+     *
+     * <p>⚠️ {@code CreateTime} 是 {@code varchar(50)}（{@code db-schema.md#db-6-8}），排序按字典序；
+     * 种子/生产格式统一为 {@code yyyy-MM-dd HH:mm:ss} 时与时间序等价，再用自增 {@code Id} 兜同秒。
+     * 本方法**只读**，不参与任何状态流转。
+     */
+    public List<Map<String, Object>> selectRecentByCustomer(String customerId, int limit) {
+        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, "
+                + "PayIf, DeliveryIf, ReceiveIf, CreateTime, SettlementDate, Quantity, CancelledAt, "
+                + "RefundStatus, RefundRetryCount, RefundReason, RefundAmount, RefundApplyAt, "
+                + "RefundHandledAt, RefundHandler "
+                + "FROM mall_management_sql.`order` WHERE CustomerId = ? "
+                + "ORDER BY CreateTime DESC, Id DESC LIMIT ?";
+        return jdbcClient.sql(sql).params(customerId, limit).query().listOfRows();
+    }
+
+    /** 客服：某客户的订单总数（用于「你最近有 N 笔订单」）。 */
+    public long countByCustomer(String customerId) {
+        return jdbcClient.sql("SELECT COUNT(*) FROM mall_management_sql.`order` WHERE CustomerId = ?")
+                .param(customerId)
+                .query(Long.class)
+                .single();
+    }
+
+    /** 客服：按单号查该客户名下的订单；不存在 / 不是他的单 ⇒ {@code null}。 */
+    public Map<String, Object> selectByOrderIdAndCustomer(String customerId, String orderId) {
+        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, "
+                + "PayIf, DeliveryIf, ReceiveIf, CreateTime, SettlementDate, Quantity, CancelledAt, "
+                + "RefundStatus, RefundRetryCount, RefundReason, RefundAmount, RefundApplyAt, "
+                + "RefundHandledAt, RefundHandler "
+                + "FROM mall_management_sql.`order` WHERE CustomerId = ? AND OrderId = ? LIMIT 1";
+        return jdbcClient.sql(sql).params(customerId, orderId).query().listOfRows()
+                .stream().findFirst().orElse(null);
+    }
+
+    /** 客服：某商家最近的订单（角色 2 的「查订单」走这里）。 */
+    public List<Map<String, Object>> selectRecentByMerchant(String merchantId, int limit) {
+        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, "
+                + "PayIf, DeliveryIf, ReceiveIf, CreateTime, SettlementDate, Quantity, CancelledAt, "
+                + "RefundStatus, RefundRetryCount, RefundReason, RefundAmount, RefundApplyAt, "
+                + "RefundHandledAt, RefundHandler "
+                + "FROM mall_management_sql.`order` WHERE MerchantId = ? "
+                + "ORDER BY CreateTime DESC, Id DESC LIMIT ?";
+        return jdbcClient.sql(sql).params(merchantId, limit).query().listOfRows();
+    }
+
+    /** 客服：某商家的订单总数。 */
+    public long countByMerchant(String merchantId) {
+        return jdbcClient.sql("SELECT COUNT(*) FROM mall_management_sql.`order` WHERE MerchantId = ?")
+                .param(merchantId)
+                .query(Long.class)
+                .single();
+    }
+
+    /** 客服：按单号查该商家名下的订单。 */
+    public Map<String, Object> selectByOrderIdAndMerchant(String merchantId, String orderId) {
+        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, "
+                + "PayIf, DeliveryIf, ReceiveIf, CreateTime, SettlementDate, Quantity, CancelledAt, "
+                + "RefundStatus, RefundRetryCount, RefundReason, RefundAmount, RefundApplyAt, "
+                + "RefundHandledAt, RefundHandler "
+                + "FROM mall_management_sql.`order` WHERE MerchantId = ? AND OrderId = ? LIMIT 1";
+        return jdbcClient.sql(sql).params(merchantId, orderId).query().listOfRows()
+                .stream().findFirst().orElse(null);
+    }
 }

@@ -1,0 +1,10 @@
+GET /chat/tools  role=2  2026-10-24 14:21:03
+count=7
+
+- merchant_comments | targetRole=[2] | intent=COMMENT_QUERY | params=[]
+- merchant_orders | targetRole=[2] | intent=ORDER_QUERY | params=['orderId']
+- merchant_refunds | targetRole=[2] | intent=REFUND_QUERY | params=[]
+- navigate | targetRole=[] | intent=GUIDE_NAVIGATION | params=['target_path', 'need_publish']
+- open_store | targetRole=[1, 2, 3] | intent=OPEN_STORE | params=[]
+- query_goods | targetRole=[] | intent=GOODS_QUERY | params=['goodsKeyword']
+- seckill_signup | targetRole=[1, 2] | intent=ADD_TO_SECKILL | params=['need_publish']

@@ -79,14 +79,14 @@
       </div>
 
       <!-- ═══ 01 基本信息（稿 `:347-375`）══════════════════════════════════════ -->
-      <section class="sec">
+      <section id="tour-publish-basic" class="sec">
         <div class="sec-h"><span class="idx">01</span><h2>基本信息</h2></div>
 
         <div class="grid2">
           <div class="f">
-            <label for="g-name">商品名称</label>
+            <label for="tour-publish-title">商品名称</label>
             <input
-              id="g-name"
+              id="tour-publish-title"
               v-model="GoodName"
               class="inp"
               :class="{ err: showTip && !GoodName }"
@@ -119,7 +119,7 @@
                本页保留**既有真控件** `<input type="radio" v-model="GoodType">`（机制逐字未动），
                只取其视觉（发丝线胶囊 + 选中态染 `--brand`）。`aria-checked` 的语义由
                **原生 radio** 承担 ⇒ 比 `<button>` 更准，不是降级。 -->
-          <div class="codes" :class="{ err: showTip && !GoodType }">
+          <div id="tour-publish-category" class="codes" :class="{ err: showTip && !GoodType }">
             <label
               v-for="item in typeList"
               :key="item.Id"
@@ -152,13 +152,13 @@
       </section>
 
       <!-- ═══ 02 价格库存（稿 `:378-403`）══════════════════════════════════════ -->
-      <section class="sec">
+      <section id="tour-publish-pricing" class="sec">
         <div class="sec-h"><span class="idx">02</span><h2>价格库存</h2></div>
 
         <div class="grid2">
           <div class="f">
             <label for="g-price">商品价格</label>
-            <span class="money" :class="{ err: showTip && !Price }">
+            <span id="tour-publish-price" class="money" :class="{ err: showTip && !Price }">
               <span class="u">¥</span>
               <input id="g-price" v-model="Price" type="number" placeholder="0.00">
             </span>
@@ -192,7 +192,7 @@
 
         <!-- 预留位 ②（稿 `:395-402`）—— 块级。输入框同款死控件。 -->
         <div
-          class="f mt"
+          class="f mt" id="tour-publish-stock"
           data-slot="预留 · 库存（动现有代码 5 处 · 超档）"
           title="待 C3〈商品〉——goods 表无库存列（GoodsDao.java:77 的 INSERT 列序实测 7 列）：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue = 5 处，**超档**，因清单点名而画出（见 README 挂账表）"
         >
@@ -220,7 +220,7 @@
           <!-- 主图 = **既有真功能**（`chooseImage` → `previewImg`，原实现逐字未动）。
                ⚠️ 稿 `:411` 的 `.picbox.main` 里是一行文字；本页**保留既有真预览**
                `<img v-if="previewImg">`（原实现就有），无图时才显那行文字。 -->
-          <button
+          <button id="tour-publish-image"
             type="button"
             class="picbox main"
             :class="{ err: showTip && !selectedFile }"
@@ -275,7 +275,7 @@
       </section>
 
       <!-- ═══ 04 商品详情（稿 `:427-436`）══════════════════════════════════════ -->
-      <section class="sec">
+      <section id="tour-publish-detail" class="sec">
         <div class="sec-h"><span class="idx">04</span><h2>商品详情</h2></div>
 
         <!-- ⚠️ **2026-10-10〈模板表通用化〉：预留位 ④ 就地转真功能** ——
@@ -424,7 +424,7 @@
           @click="submitGoods(true)"
         >保存草稿</button>
 
-        <button type="button" class="btn-main" :disabled="saving" @click="submitGoods(false)"><IconGlyph name="ok" />提交审核</button>
+        <button id="tour-publish-submit" type="button" class="btn-main" :disabled="saving" @click="submitGoods(false)"><IconGlyph name="ok" />提交审核</button>
         <div class="hint">提交成功后会清空表单，可继续上架下一件。</div>
       </div>
     </form>
@@ -516,7 +516,7 @@ import { ref, computed, onMounted } from 'vue'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
 import { templateList } from '../api/template'   // 块 5〈折扣〉：类目上下限（公共读 /template/list）
-import { getMerchantId } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `GoodsAdd.vue:135/166/217` 钉住本文件）
+import { getMerchantId } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { resumeTourFlow } from '../composables/useTour'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `GoodsAdd.vue:135/166/217` 钉住本文件）
 import TemplatePicker from '../components/TemplatePicker.vue'
 
 const fileInput = ref(null)
@@ -577,7 +577,7 @@ const showTip = ref(false)
 
 onMounted(() => {
   loadGoodsType()
-  loadDiscountLimits()
+  loadDiscountLimits(); resumeTourFlow()
 })
 
 /**

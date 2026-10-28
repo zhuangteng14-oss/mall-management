@@ -49,3 +49,7 @@ scripts/refs-after.txt
 # 临时脚本/日志/中间产物一律写这里，别落桌面；_a3work 是同一用途的旧名，一并挡掉防复现
 _work/
 _a3work/
+
+# Python 探针运行产生的字节码缓存（2026-10-24 收工清理）
+__pycache__/
+*.pyc

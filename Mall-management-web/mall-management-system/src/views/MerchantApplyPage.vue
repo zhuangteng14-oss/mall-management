@@ -64,7 +64,7 @@
               <div class="form-grid">
                 <label class="field">
                   <span>店铺名称 <i>必填</i></span>
-                  <input v-model.trim="form.shopName" type="text" maxlength="64" placeholder="例如：米可数码专营店" />
+                  <input id="tour-shop-name" v-model.trim="form.shopName" type="text" maxlength="64" placeholder="例如：米可数码专营店" />
                 </label>
                 <label class="field">
                   <span>营业执照号 <i>必填</i></span>
@@ -115,7 +115,7 @@
               </div>
 
               <div class="f-acts">
-                <button type="submit" class="btn btn-solid" :disabled="busy">
+                <button id="tour-submit" type="submit" class="btn btn-solid" :disabled="busy">
                   <IconGlyph name="ok" />{{ busy ? '提交中…' : '提交申请' }}
                 </button>
                 <button type="button" class="btn btn-ghost" :disabled="busy" @click="resetForm">清空</button>

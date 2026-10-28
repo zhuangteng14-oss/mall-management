@@ -1,0 +1,9 @@
+PASS  匿名首页出现客服球  {"hash":"#/customer"}
+PASS  点击客服球打开面板  {"point":{"x":1373,"y":848,"w":56,"h":56}}
+PASS  匿名发送后拿到回复
+PASS  /chat/ask 真实返回 401  {"requestId":"109056.360","status":401,"url":"http://localhost:8080/chat/ask"}
+PASS  气泡显示「登录后才能查询」  {"lastBot":"登录后才能查询你的订单和售后。先登录，再回来问我吧～怎么开店登录后才能查询你的订单和售后。先登录，再回来问我吧～"}
+PASS  不跳全局登录页  {"beforeHash":"#/customer","afterHash":"#/customer","loginFormVisible":false}
+PASS  页面无未捕获异常  {"pageErrors":[]}
+
+7/7 PASS

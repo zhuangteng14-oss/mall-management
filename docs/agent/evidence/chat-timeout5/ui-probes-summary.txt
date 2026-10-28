@@ -1,0 +1,38 @@
+10 个 UI 探针结果（2026-10-24 20:16–20:23，dev profile，真前端 8080 + 真后端 8088）
+
+环境前提：embedding-3 返回 HTTP 429 / code 1113（余额不足或无可用资源包），
+语义路由预加载失败 ⇒ 所有查询走 LLM 兜底。详见 embedding-429.txt。
+
+编号  脚本                              结果                     失败是否与 embedding 有关
+----  --------------------------------  -----------------------  --------------------------
+01    probe-chat-tour.mjs               26/26 PASS               —（mock /chat/ask，只验前端）
+02    probe-chat-goods-query.mjs        6/6 PASS                 —
+03    probe-chat-goods-tour.mjs         12/12 PASS               —
+04    probe-chat-guide-vs-jump.mjs      14/14 PASS               —
+05    probe-chat-llm.mjs (online)       4/4 PASS                 —
+06    probe-chat-nav-graph.mjs          28/36 PASS（8 FAIL）     是
+07    probe-chat-product-aftersales     12/12 PASS               —
+08    probe-chat-semantic-router.mjs    5 项 / 4 失败（中止）    是
+09    probe-chat-tour-advance.mjs       12/12 PASS               —
+10    probe-chat-tour-flow.mjs          23/23 PASS               —
+
+汇总：8 绿 / 2 红。两条红的失败项全部落在语义路由专有意图上：
+
+- nav-graph 的 8 条 FAIL：
+  「我想改一下那个 299 元耳机的价格」应为 GOODS_MANAGE + /merchant/user/list，
+  实际 GOODS_QUERY、无 action；
+  「我要管理我的钱」应为 ASSET_QUERY + 会员中心并如实说明「钱包」，
+  实际 GUIDE_NAVIGATION + /merchant/user/member、/customer/user/member，回复未提钱包。
+- semantic-router 的 4 条 FAIL：
+  「怎么看我上架的商品」应为 GOODS_MANAGE + /merchant/user/list，
+  实际 GOODS_QUERY；后续胶囊点击因无胶囊而中止。
+
+原因链：SemanticRouter.route() 在向量未加载时返回 null ⇒
+MERCHANT_DASHBOARD / GOODS_MANAGE / ASSET_QUERY 不在 LlmIntentClassifier.ALLOWED
+白名单里 ⇒ 纯 Flash 路径不可能产出这些意图。与超时 3→5 无关。
+
+超时侧观察（同一份 dev 日志，共 40 次 CHAT_TRACE）：
+- 成功 37 次，其中 20 次 llmLatencyMs > 3000（若仍是 3s 会全部超时）；
+- 成功调用最慢 4863ms；
+- 5s 下仍有 3 次 request_timeout（探针并发期间）。
+说明 5s 明显降低了误杀，但不是零超时；真实链路顺序压测见 real-chain-10.json。

@@ -1,0 +1,30 @@
+﻿group,sentence,run,role,http,wallMs,traceId,intent,semanticScore,secondScore,semanticConfident,llmUsed,llmFallbackReason,toolName,toolSuccess,totalLatencyMs,finalBranch,degradeReason,actionType,actionTarget,reply
+B,怎么看我上架的商品,1,2,200,266,4c278a5a-e478-461c-ad85-90bd129fd852,GOODS_MANAGE,0.9167,0.8602,true,false,semantic_confident,-,-,254,switch:GOODS_MANAGE,none,tour,/merchant/user/list,好的，我来一步步教您。点击下方按钮开始。
+B,怎么看我上架的商品,2,2,200,13,aafae589-be87-461b-9562-85d13f4cb7db,GOODS_MANAGE,0.9167,0.8602,true,false,semantic_confident,-,-,0,switch:GOODS_MANAGE,none,tour,/merchant/user/list,好的，我来一步步教您。点击下方按钮开始。
+B,怎么看我上架的商品,3,2,200,8,6ca39120-011c-4a9b-afe4-eb68b6018591,GOODS_MANAGE,0.9167,0.8602,true,false,semantic_confident,-,-,0,switch:GOODS_MANAGE,none,tour,/merchant/user/list,好的，我来一步步教您。点击下方按钮开始。
+B,怎么前往商家工作台,1,2,200,237,bc2af443-1ae4-4504-a53d-43f61828912c,MERCHANT_DASHBOARD,0.9635,0.7925,true,false,semantic_confident,-,-,227,switch:MERCHANT_DASHBOARD,none,tour,/merchant,好的，我来一步步教您。点击下方按钮开始。
+B,怎么前往商家工作台,2,2,200,10,f2e6bb89-74ef-4133-947d-a822caeda69e,MERCHANT_DASHBOARD,0.9635,0.7925,true,false,semantic_confident,-,-,0,switch:MERCHANT_DASHBOARD,none,tour,/merchant,好的，我来一步步教您。点击下方按钮开始。
+B,怎么前往商家工作台,3,2,200,0,58979bb5-75cc-433c-bade-2f546380b191,MERCHANT_DASHBOARD,0.9635,0.7925,true,false,semantic_confident,-,-,0,switch:MERCHANT_DASHBOARD,none,tour,/merchant,好的，我来一步步教您。点击下方按钮开始。
+B,我花出去的钱去哪了,1,2,200,225,6c7b3efc-d870-485d-9fd7-822b409c2337,ASSET_QUERY,1.0000,0.9486,true,false,semantic_confident,-,-,213,switch:ASSET_QUERY,none,tour,/merchant/user/member,钱包余额和收支流水都在会员中心，我一步步带您过去。
+B,我花出去的钱去哪了,2,2,200,14,840deb6d-1225-4727-b671-7cf716932214,ASSET_QUERY,1.0000,0.9486,true,false,semantic_confident,-,-,0,switch:ASSET_QUERY,none,tour,/merchant/user/member,钱包余额和收支流水都在会员中心，我一步步带您过去。
+B,我花出去的钱去哪了,3,2,200,8,8505318b-ceb9-4730-a7fe-db7d24af5a92,ASSET_QUERY,1.0000,0.9486,true,false,semantic_confident,-,-,0,switch:ASSET_QUERY,none,tour,/merchant/user/member,钱包余额和收支流水都在会员中心，我一步步带您过去。
+B,今天天气不错,1,2,200,298,fc0fa470-31ee-4ebc-a3dd-0a830198f459,CLARIFY,0.5718,0.5591,false,false,semantic_not_confident,-,-,289,switch:CLARIFY,none,,,请问您是想查订单、管理商品，还是去工作台？
+B,今天天气不错,2,2,200,18,215bbd65-8d88-432f-86fe-b5ef0a5ccb26,CLARIFY,0.5718,0.5591,false,false,semantic_not_confident,-,-,9,switch:CLARIFY,none,,,请问您是想查订单、管理商品，还是去工作台？
+B,今天天气不错,3,2,200,17,25299329-43b4-4f7d-81eb-d6d8a1a114ba,CLARIFY,0.5718,0.5591,false,false,semantic_not_confident,-,-,7,switch:CLARIFY,none,,,请问您是想查订单、管理商品，还是去工作台？
+B,怎么处理退款,1,2,200,249,e7e1b2c9-4508-4133-b994-e982d77cd3a0,GUIDE_NAVIGATION,1.0000,0.9217,true,false,semantic_confident,navigate,true,240,tool:navigate,none,tour,/merchant/after-sales,好的，我来一步步教您。点击下方按钮开始。
+B,怎么处理退款,2,2,200,12,53074d08-fbf0-40ef-ab7d-341cef274df5,GUIDE_NAVIGATION,1.0000,0.9217,true,false,semantic_confident,navigate,true,0,tool:navigate,none,tour,/merchant/after-sales,好的，我来一步步教您。点击下方按钮开始。
+B,怎么处理退款,3,2,200,8,9fb1942d-4e43-45f2-91d1-913cbc075f33,GUIDE_NAVIGATION,1.0000,0.9217,true,false,semantic_confident,navigate,true,1,tool:navigate,none,tour,/merchant/after-sales,好的，我来一步步教您。点击下方按钮开始。
+B,我的退款进度,1,2,200,3296,f0303d3c-8edb-4437-8db2-8e85ef091e6b,REFUND_QUERY,0.9327,0.8815,true,false,semantic_confident,merchant_refunds,true,3284,tool:merchant_refunds,none,,,你店铺目前没有售后记录。
+B,我的退款进度,2,2,200,1905,a518e9c3-fb61-4506-945d-6595552bde3b,REFUND_QUERY,0.9327,0.8815,true,false,semantic_confident,merchant_refunds,true,1898,tool:merchant_refunds,none,,,您好，您目前没有售后记录哦，所以退款进度暂时没有信息呢。
+B,我的退款进度,3,2,200,1045,80cd725a-5acf-43de-90cb-a748e12a0bc4,REFUND_QUERY,0.9327,0.8815,true,false,semantic_confident,merchant_refunds,true,1037,tool:merchant_refunds,none,,,您好，关于您的退款进度，目前没有售后记录哦。
+B,直接带我去管理商品,1,2,200,226,da5f3da3-e2a4-4142-88ef-bd9028cd6eec,GOODS_MANAGE,0.8898,0.7523,true,false,semantic_confident,-,-,215,switch:GOODS_MANAGE,none,jump,/merchant/user/list,已为您准备好直达入口，点击即可前往。
+B,直接带我去管理商品,2,2,200,10,593f922a-3a52-4a86-99f1-7e5a60bbecc7,GOODS_MANAGE,0.8898,0.7523,true,false,semantic_confident,-,-,0,switch:GOODS_MANAGE,none,jump,/merchant/user/list,已为您准备好直达入口，点击即可前往。
+B,直接带我去管理商品,3,2,200,13,19c8f628-4719-4f00-a3dc-b4e7a1358a26,GOODS_MANAGE,0.8898,0.7523,true,false,semantic_confident,-,-,0,switch:GOODS_MANAGE,none,jump,/merchant/user/list,已为您准备好直达入口，点击即可前往。
+C,拆封了能退货吗,1,2,200,8,797a1411-3a2f-4a61-8895-87ecb03466fa,FAQ,-,-,-,false,policy_faq,-,-,0,switch:FAQ,none,,,支持7天无理由，但需保证不影响二次销售哦。
+C,运费怎么算,1,2,200,8,357ff83b-a74d-4d72-8a85-df5b016c913a,FAQ,-,-,-,false,policy_faq,-,-,0,switch:FAQ,none,,,本店满99包邮，偏远地区除外。
+C,你好,1,2,200,253,18055a35-5a89-4ae1-aa17-660a6100e192,GREETING,1.0000,0.7243,true,false,semantic_confident,-,-,245,switch:GREETING,none,,,你好呀～我可以帮你查订单、查售后进度，也能一键带你去开店。
+C,查我的订单,1,2,200,3237,d83a2eed-6c67-45c5-9fe0-4d9ec827b5f9,ORDER_QUERY,1.0000,0.9041,true,false,semantic_confident,merchant_orders,true,3231,tool:merchant_orders,none,,,你店铺最近有 8 笔订单，最新一笔是「drill（单号 DRILL-TEST-1792331236），实付 ¥10.00，下单时间 2026-10-18 13:47:16」。当前状态：已取消。
+C,我要看评论,1,2,200,3263,51e7dad7-2ff8-43c7-a34a-8eb377b0f73b,COMMENT_QUERY,1.0000,0.8150,true,false,semantic_confident,merchant_comments,true,3244,tool:merchant_comments,none,,,您店铺的商品目前还没有收到评论或提问。买家确认收货后可以在商品详情里评价。
+C,222:ij-555,1,2,200,246,23a9c2b1-a1a0-4f17-ad99-afa69a34909a,CLARIFY,0.4955,0.4950,false,false,semantic_not_confident,-,-,239,switch:CLARIFY,none,,,请问您是想查订单、管理商品，还是去工作台？
+C,我的退款进度,1,1,200,938,9ce48914-6328-406f-93f2-28d58ce2f692,REFUND_QUERY,0.9327,0.8815,true,false,semantic_confident,buyer_refunds,true,930,tool:buyer_refunds,none,,,您好，经过查询，您目前没有售后记录哦。
+C,查我的订单,1,1,200,3022,187903de-f11c-4e97-a744-dc7d49be8aa0,ORDER_QUERY,1.0000,0.9041,true,false,semantic_confident,buyer_orders,true,3017,tool:buyer_orders,none,,,你最近有 3708 笔订单，最新一笔是「Draft-B7-Demo（单号 BROR943184306407），实付 ¥155.84，下单时间 2026-10-20 21:18:47」。当前状态：已取消。

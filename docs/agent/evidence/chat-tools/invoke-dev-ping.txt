@@ -1,0 +1,2 @@
+POST /chat/tools/invoke  tool=dev_ping（商家会话）
+{"data":{"registeredTools":10,"role":2,"userId":"5N1k5K2guh","echo":"plugin-self-test"},"success":true,"reply":"pong（注册表里共 10 个工具）","intent":"UNKNOWN"}

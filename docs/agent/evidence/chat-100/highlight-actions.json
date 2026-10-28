@@ -1,0 +1,32 @@
+[
+  {
+    "id": "S4-01",
+    "label": "↗开始引导",
+    "hash": "#/customer",
+    "tourBar": true,
+    "driver": true,
+    "highlight": null,
+    "popover": "×点击「购物车」这一步会带你去「购物车」。1 of 1PreviousDone",
+    "shot": "S4-01-landed.png"
+  },
+  {
+    "id": "S5-02",
+    "label": "↗开始引导",
+    "hash": "#/merchant",
+    "tourBar": true,
+    "driver": true,
+    "highlight": null,
+    "popover": "×① 进入商家后台我们首先要进入商家后台，请点击右上角的「用户中心」。1 of 1PreviousDone",
+    "shot": "S5-02-landed.png"
+  },
+  {
+    "id": "S1-13",
+    "label": "↗去商城搜索",
+    "hash": "#/customer/search?kw=%E8%8B%B9%E6%9E%9C%E6%89%8B%E6%9C%BA",
+    "tourBar": false,
+    "driver": false,
+    "highlight": null,
+    "popover": null,
+    "shot": "S1-13-landed.png"
+  }
+]

@@ -1,0 +1,6 @@
+PASS  商家登录落 /merchant  ""
+PASS  复杂语义：LLM 路径回「商品还没上架」引导  {"elapsedMs":218,"reply":"系统显示您当前是品牌商家。品牌：Chenguang-Brand-Store，长期有效。商品还没上架。先在「上架商品」发布商品，再回秒杀报名页选它；两个入口都在下"}
+PASS  两枚胶囊：去发布商品 / 去秒杀报名  {"chips":["去发布商品→","去秒杀报名→"]}
+PASS  点「去发布商品」留在首页起步（第 1 步高亮用户中心，不瞬移）  {"hash":"#/merchant","progress":"第 1 步 / 共 7 步","active":true}
+
+online: 4/4 PASS

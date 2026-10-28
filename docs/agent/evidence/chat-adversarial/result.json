@@ -1,0 +1,638 @@
+[
+  {
+    "id": "C01",
+    "text": "那个红色的裙子多少钱？",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "GOODS_QUERY",
+    "success": true,
+    "replyApi": "店里暂时没有搜到「红色的裙子」，不过商城搜索还能找其他店铺的同款。点下面按钮，我直接带您去搜索页。",
+    "actionApi": {
+      "type": "jump",
+      "targetPath": "/customer/search?kw=%E7%BA%A2%E8%89%B2%E7%9A%84%E8%A3%99%E5%AD%90",
+      "targetLabel": "商城搜索",
+      "label": "去商城搜索"
+    },
+    "suggestionsApi": [
+      {
+        "label": "去商城搜索",
+        "routeKey": "search",
+        "keyword": "红色的裙子"
+      },
+      "查我的订单"
+    ],
+    "ui": {
+      "text": "店里暂时没有搜到「红色的裙子」，不过商城搜索还能找其他店铺的同款。点下面按钮，我直接带您去搜索页。",
+      "chips": [
+        "去商城搜索",
+        "查我的订单"
+      ],
+      "action": "去商城搜索",
+      "actionRaw": "↗去商城搜索"
+    }
+  },
+  {
+    "id": "C02",
+    "text": "昨天看的那双鞋还有货吗？",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "GOODS_QUERY",
+    "success": true,
+    "replyApi": "店里暂时没有搜到「鞋」，不过商城搜索还能找其他店铺的同款。点下面按钮，我直接带您去搜索页。",
+    "actionApi": {
+      "type": "jump",
+      "targetPath": "/customer/search?kw=%E9%9E%8B",
+      "targetLabel": "商城搜索",
+      "label": "去商城搜索"
+    },
+    "suggestionsApi": [
+      {
+        "label": "去商城搜索",
+        "routeKey": "search",
+        "keyword": "鞋"
+      },
+      "查我的订单"
+    ],
+    "ui": {
+      "text": "店里暂时没有搜到「鞋」，不过商城搜索还能找其他店铺的同款。点下面按钮，我直接带您去搜索页。",
+      "chips": [
+        "去商城搜索",
+        "查我的订单"
+      ],
+      "action": "去商城搜索",
+      "actionRaw": "↗去商城搜索"
+    }
+  },
+  {
+    "id": "C03",
+    "text": "这玩意儿包邮吗？",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "FAQ",
+    "success": true,
+    "replyApi": "本店满99包邮，偏远地区除外。",
+    "actionApi": null,
+    "suggestionsApi": [
+      "查我的订单",
+      "查售后进度",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "本店满99包邮，偏远地区除外。",
+      "chips": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "action": null,
+      "actionRaw": null
+    }
+  },
+  {
+    "id": "C04",
+    "text": "有优惠券吗？能便宜点不？",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "GUIDE_NAVIGATION",
+    "success": true,
+    "replyApi": "好的，我带您去「会员中心」，点下面按钮开始。",
+    "actionApi": {
+      "type": "tour",
+      "targetPath": "/customer/user/member",
+      "targetLabel": "会员中心",
+      "label": "开始引导"
+    },
+    "suggestionsApi": [
+      "查我的订单",
+      "查售后进度",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "好的，我带您去「会员中心」，点下面按钮开始。",
+      "chips": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "action": "开始引导",
+      "actionRaw": "↗开始引导"
+    }
+  },
+  {
+    "id": "C05",
+    "text": "我前天买的东西发货没？",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "ORDER_QUERY",
+    "success": true,
+    "replyApi": "您最近的三笔订单目前都是「已取消」状态，分别是单号 BROR943184306407 的 Draft-B7-Demo（¥155.84）、单号 SIM-BURST-70862-1328 的 27 英寸 2K 显示器 锐视 S27（¥1013.22），以及单号 SIM-BURST-70862-1327 的机械键盘 87 键 茶轴（¥256.62），下单时间都是 2026-10-20。这几笔里没有显示发货相关的状态，您要是想确认具体是哪一笔，可以告诉我单号，我再帮您看看。",
+    "actionApi": null,
+    "suggestionsApi": [
+      {
+        "label": "查看全部订单",
+        "routeKey": "orders"
+      },
+      "查售后进度",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "您最近的三笔订单目前都是「已取消」状态，分别是单号 BROR943184306407 的 Draft-B7-Demo（¥155.84）、单号 SIM-BURST-70862-1328 的 27 英寸 2K 显示器 锐视 S27（¥1013.22），以及单号 SIM-BURST-70862-1327 的机械键盘 87 键 茶轴（¥256.62），下单时间都是 2026-10-20。这几笔里没有显示发货相关的状态，您要是想确认具体是哪一笔，可以告诉我单号，我再帮您看看。",
+      "chips": [
+        "查看全部订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "action": null,
+      "actionRaw": null
+    }
+  },
+  {
+    "id": "C06",
+    "text": "那个快递怎么还没到，卡在哪儿了？",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "ORDER_QUERY",
+    "success": true,
+    "replyApi": "您最近的一笔订单是单号 BROR943184306407，商品为 Draft-B7-Demo，金额 155.84 元，下单时间是 2026-10-20 21:18:47，目前状态显示为已取消，所以这单没有在途的物流信息。您看是不是有其他单号想查？您可以把单号发给我，我帮您核对。",
+    "actionApi": null,
+    "suggestionsApi": [
+      {
+        "label": "查看全部订单",
+        "routeKey": "orders"
+      },
+      "查售后进度",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "您最近的一笔订单是单号 BROR943184306407，商品为 Draft-B7-Demo，金额 155.84 元，下单时间是 2026-10-20 21:18:47，目前状态显示为已取消，所以这单没有在途的物流信息。您看是不是有其他单号想查？您可以把单号发给我，我帮您核对。",
+      "chips": [
+        "查看全部订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "action": null,
+      "actionRaw": null
+    }
+  },
+  {
+    "id": "C07",
+    "text": "帮我查一下这个月我花了多少钱买衣服？",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "ASSET_QUERY",
+    "success": true,
+    "replyApi": "钱包余额、优惠券和收支流水都在「会员中心」，我一步步带您过去。",
+    "actionApi": {
+      "type": "tour",
+      "targetPath": "/customer/user/member",
+      "targetLabel": "会员中心",
+      "label": "开始引导"
+    },
+    "suggestionsApi": [
+      "查我的订单",
+      "查售后进度",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "钱包余额、优惠券和收支流水都在「会员中心」，我一步步带您过去。",
+      "chips": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "action": "开始引导",
+      "actionRaw": "↗开始引导"
+    }
+  },
+  {
+    "id": "C08",
+    "text": "人呢？客服死哪去了，我的退款到底什么时候退！",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "REFUND_QUERY",
+    "success": true,
+    "replyApi": "非常抱歉让您久等了，我这边确实没有找到您名下的售后申请，所以暂时看不到退款进度。您可以告诉我订单号，我帮您再确认一下；如果还没提交过售后，也可以在订单页面发起退款申请。",
+    "actionApi": null,
+    "suggestionsApi": [
+      "查我的订单",
+      "联系人工客服",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "非常抱歉让您久等了，我这边确实没有找到您名下的售后申请，所以暂时看不到退款进度。您可以告诉我订单号，我帮您再确认一下；如果还没提交过售后，也可以在订单页面发起退款申请。",
+      "chips": [
+        "查我的订单",
+        "联系人工客服",
+        "怎么开店"
+      ],
+      "action": null,
+      "actionRaw": null
+    }
+  },
+  {
+    "id": "C09",
+    "text": "东西坏了，我要退货，但是我昨天已经拆封了，还能退吗？",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "FAQ",
+    "success": true,
+    "replyApi": "已拆封的商品，若不影响二次销售（吊牌、包装完整）可在 7 天内无理由退货；如果是质量问题（比如东西坏了），拆封也可以退换，运费由商家承担。",
+    "actionApi": null,
+    "suggestionsApi": [
+      "查我的订单",
+      "查售后进度",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "已拆封的商品，若不影响二次销售（吊牌、包装完整）可在 7 天内无理由退货；如果是质量问题（比如东西坏了），拆封也可以退换，运费由商家承担。",
+      "chips": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "action": null,
+      "actionRaw": null
+    }
+  },
+  {
+    "id": "C10",
+    "text": "我买错尺码了，想换个大一号的，怎么弄？",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "GUIDE_NAVIGATION",
+    "success": true,
+    "replyApi": "好的，我带您去「我的订单」，点下面按钮开始。",
+    "actionApi": {
+      "type": "tour",
+      "targetPath": "/customer/orders",
+      "targetLabel": "我的订单",
+      "label": "开始引导"
+    },
+    "suggestionsApi": [
+      "查我的订单",
+      "查售后进度",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "好的，我带您去「我的订单」，点下面按钮开始。",
+      "chips": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "action": "开始引导",
+      "actionRaw": "↗开始引导"
+    }
+  },
+  {
+    "id": "C11",
+    "text": "帮我把购物车里的东西全结算了。",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "GUIDE_NAVIGATION",
+    "success": true,
+    "replyApi": "结算和修改购物车需要您亲自在页面里确认，我不会替您操作。点下面按钮，我带您去「购物车」。",
+    "actionApi": {
+      "type": "tour",
+      "targetPath": "/customer/cart",
+      "targetLabel": "购物车",
+      "label": "开始引导"
+    },
+    "suggestionsApi": [
+      "查我的订单",
+      "查售后进度",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "结算和修改购物车需要您亲自在页面里确认，我不会替您操作。点下面按钮，我带您去「购物车」。",
+      "chips": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "action": "开始引导",
+      "actionRaw": "↗开始引导"
+    }
+  },
+  {
+    "id": "C12",
+    "text": "我要改一下收货地址，改成深圳市南山区。",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "GUIDE_NAVIGATION",
+    "success": true,
+    "replyApi": "收货地址和账号资料在「个人信息」里，需要您亲自修改。点下面按钮，我带您过去。",
+    "actionApi": {
+      "type": "tour",
+      "targetPath": "/customer/user/info",
+      "targetLabel": "个人信息",
+      "label": "开始引导"
+    },
+    "suggestionsApi": [
+      "查我的订单",
+      "查售后进度",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "收货地址和账号资料在「个人信息」里，需要您亲自修改。点下面按钮，我带您过去。",
+      "chips": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "action": "开始引导",
+      "actionRaw": "↗开始引导"
+    }
+  },
+  {
+    "id": "C13",
+    "text": "我要把购物车里的那个护膝删了。",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "GUIDE_NAVIGATION",
+    "success": true,
+    "replyApi": "结算和修改购物车需要您亲自在页面里确认，我不会替您操作。点下面按钮，我带您去「购物车」。",
+    "actionApi": {
+      "type": "tour",
+      "targetPath": "/customer/cart",
+      "targetLabel": "购物车",
+      "label": "开始引导"
+    },
+    "suggestionsApi": [
+      "查我的订单",
+      "查售后进度",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "结算和修改购物车需要您亲自在页面里确认，我不会替您操作。点下面按钮，我带您去「购物车」。",
+      "chips": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "action": "开始引导",
+      "actionRaw": "↗开始引导"
+    }
+  },
+  {
+    "id": "C14",
+    "text": "我这个月赚了多少钱？",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/merchant",
+    "responseCountDelta": 1,
+    "intent": "GUIDE_NAVIGATION",
+    "success": true,
+    "replyApi": "好的，我带您去「经营数据」，点下面按钮开始。",
+    "actionApi": {
+      "type": "tour",
+      "targetPath": "/merchant/stats",
+      "targetLabel": "经营数据",
+      "label": "开始引导"
+    },
+    "suggestionsApi": [
+      "查我的订单",
+      "查售后进度",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "好的，我带您去「经营数据」，点下面按钮开始。",
+      "chips": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "action": "开始引导",
+      "actionRaw": "↗开始引导"
+    }
+  },
+  {
+    "id": "C15",
+    "text": "我想把店里那个耳机改一下价格，怎么改？",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/merchant",
+    "responseCountDelta": 1,
+    "intent": "GOODS_MANAGE",
+    "success": true,
+    "replyApi": "好的，我带您去「查看商品」，点下面按钮开始。",
+    "actionApi": {
+      "type": "tour",
+      "targetPath": "/merchant/user/list",
+      "targetLabel": "查看商品",
+      "label": "开始引导"
+    },
+    "suggestionsApi": [
+      "查我的订单",
+      "查售后进度",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "好的，我带您去「查看商品」，点下面按钮开始。",
+      "chips": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "action": "开始引导",
+      "actionRaw": "↗开始引导"
+    }
+  },
+  {
+    "id": "C16",
+    "text": "我是新来的商家，怎么开通店铺？",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/merchant",
+    "responseCountDelta": 1,
+    "intent": "OPEN_STORE",
+    "success": true,
+    "replyApi": "系统显示您当前是品牌商家。品牌：Chenguang-Brand-Store，长期有效。如需新增品牌，可以到申请页提交品牌加盟材料。好的，我来一步步教您。点击下方按钮开始。",
+    "actionApi": {
+      "type": "tour",
+      "targetPath": "/merchant/user/apply",
+      "targetLabel": "商家入驻申请",
+      "label": "开始引导"
+    },
+    "suggestionsApi": [
+      "查我的订单",
+      "查售后进度",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "系统显示您当前是品牌商家。品牌：Chenguang-Brand-Store，长期有效。如需新增品牌，可以到申请页提交品牌加盟材料。好的，我来一步步教您。点击下方按钮开始。",
+      "chips": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "action": "开始引导",
+      "actionRaw": "↗开始引导"
+    }
+  },
+  {
+    "id": "C17",
+    "text": "你是谁？你是GPT吗？",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "BOT_IDENTITY",
+    "success": true,
+    "replyApi": "我是米可小助手，商城的智能客服，不是 GPT 之类的通用模型。我可以帮你查订单、售后，或带你去搜索商品。",
+    "actionApi": null,
+    "suggestionsApi": [
+      "查我的订单",
+      "查售后进度",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "我是米可小助手，商城的智能客服，不是 GPT 之类的通用模型。我可以帮你查订单、售后，或带你去搜索商品。",
+      "chips": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "action": null,
+      "actionRaw": null
+    }
+  },
+  {
+    "id": "C18",
+    "text": "讲个笑话听听。",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "OUT_OF_SCOPE",
+    "success": true,
+    "replyApi": "这个我帮不上忙～我是商城的智能客服，可以帮你查订单、售后，或者搜索商品。",
+    "actionApi": null,
+    "suggestionsApi": [
+      "查我的订单",
+      "查售后进度",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "这个我帮不上忙～我是商城的智能客服，可以帮你查订单、售后，或者搜索商品。",
+      "chips": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "action": null,
+      "actionRaw": null
+    }
+  },
+  {
+    "id": "C19",
+    "text": "给我写一段Python代码。",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "OUT_OF_SCOPE",
+    "success": true,
+    "replyApi": "这个我帮不上忙～我是商城的智能客服，可以帮你查订单、售后，或者搜索商品。",
+    "actionApi": null,
+    "suggestionsApi": [
+      "查我的订单",
+      "查售后进度",
+      "怎么开店"
+    ],
+    "ui": {
+      "text": "这个我帮不上忙～我是商城的智能客服，可以帮你查订单、售后，或者搜索商品。",
+      "chips": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "action": null,
+      "actionRaw": null
+    }
+  },
+  {
+    "id": "C20a",
+    "text": "asdfghjkl",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "CLARIFY",
+    "success": true,
+    "replyApi": "没太听懂您的意思。您可以问我：搜商品、查订单，或者去个人中心。",
+    "actionApi": null,
+    "suggestionsApi": [
+      {
+        "label": "去商城搜索",
+        "routeKey": "search"
+      },
+      "查我的订单",
+      "怎么去个人中心"
+    ],
+    "ui": {
+      "text": "没太听懂您的意思。您可以问我：搜商品、查订单，或者去个人中心。",
+      "chips": [
+        "去商城搜索",
+        "查我的订单",
+        "怎么去个人中心"
+      ],
+      "action": null,
+      "actionRaw": null
+    }
+  },
+  {
+    "id": "C20b",
+    "text": "asdfghjkl",
+    "sent": true,
+    "hashBeforeSend": null,
+    "hash": "#/customer",
+    "responseCountDelta": 1,
+    "intent": "CLARIFY",
+    "success": true,
+    "replyApi": "抱歉，我还是没太听懂。您可以直接输入商品名称去搜索，或者点下方按钮联系人工客服。",
+    "actionApi": null,
+    "suggestionsApi": [
+      {
+        "label": "去商城搜索",
+        "routeKey": "search"
+      },
+      "联系人工客服"
+    ],
+    "ui": {
+      "text": "抱歉，我还是没太听懂。您可以直接输入商品名称去搜索，或者点下方按钮联系人工客服。",
+      "chips": [
+        "去商城搜索",
+        "联系人工客服"
+      ],
+      "action": null,
+      "actionRaw": null
+    }
+  }
+]

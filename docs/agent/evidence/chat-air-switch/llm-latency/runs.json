@@ -1,0 +1,486 @@
+[
+  {
+    "row": {
+      "run": 1,
+      "sentence": "怎么前往商家工作台",
+      "http": 200,
+      "wallMs": 1467,
+      "traceId": "28e62e5f-de39-4e04-bc17-f07d27d33f11",
+      "llmUsed": "",
+      "llmLatencyMs": "",
+      "timeout": "false",
+      "timeoutType": "-",
+      "llmFallback": "",
+      "intent": "GUIDE_NAVIGATION",
+      "finalBranch": "",
+      "degradeReason": "",
+      "callOutcome": "",
+      "callLatencyMs": "",
+      "inputTokens": "",
+      "outputTokens": "",
+      "requestId": "",
+      "promptChars": "",
+      "baseChars": "",
+      "routeChars": "",
+      "toolChars": "",
+      "outputChars": "",
+      "pathChars": "",
+      "estTokens": "",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    "trace": {},
+    "call": {},
+    "prompt": {},
+    "body": {
+      "success": true,
+      "action": {
+        "type": "tour",
+        "targetPath": "/merchant/user",
+        "targetLabel": "个人中心",
+        "label": "开始引导"
+      },
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "intent": "GUIDE_NAVIGATION"
+    }
+  },
+  {
+    "row": {
+      "run": 2,
+      "sentence": "怎么前往商家工作台",
+      "http": 200,
+      "wallMs": 1311,
+      "traceId": "b5325bb3-2e17-4baa-9c98-37d0f04e3e22",
+      "llmUsed": "",
+      "llmLatencyMs": "",
+      "timeout": "false",
+      "timeoutType": "-",
+      "llmFallback": "",
+      "intent": "GUIDE_NAVIGATION",
+      "finalBranch": "",
+      "degradeReason": "",
+      "callOutcome": "",
+      "callLatencyMs": "",
+      "inputTokens": "",
+      "outputTokens": "",
+      "requestId": "",
+      "promptChars": "",
+      "baseChars": "",
+      "routeChars": "",
+      "toolChars": "",
+      "outputChars": "",
+      "pathChars": "",
+      "estTokens": "",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    "trace": {},
+    "call": {},
+    "prompt": {},
+    "body": {
+      "success": true,
+      "action": {
+        "type": "tour",
+        "targetPath": "/merchant/user",
+        "targetLabel": "个人中心",
+        "label": "开始引导"
+      },
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "intent": "GUIDE_NAVIGATION"
+    }
+  },
+  {
+    "row": {
+      "run": 3,
+      "sentence": "怎么前往商家工作台",
+      "http": 200,
+      "wallMs": 1305,
+      "traceId": "4a0b5d02-67d1-4a24-af6a-eb720cdca5a4",
+      "llmUsed": "",
+      "llmLatencyMs": "",
+      "timeout": "false",
+      "timeoutType": "-",
+      "llmFallback": "",
+      "intent": "GUIDE_NAVIGATION",
+      "finalBranch": "",
+      "degradeReason": "",
+      "callOutcome": "",
+      "callLatencyMs": "",
+      "inputTokens": "",
+      "outputTokens": "",
+      "requestId": "",
+      "promptChars": "",
+      "baseChars": "",
+      "routeChars": "",
+      "toolChars": "",
+      "outputChars": "",
+      "pathChars": "",
+      "estTokens": "",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    "trace": {},
+    "call": {},
+    "prompt": {},
+    "body": {
+      "success": true,
+      "action": {
+        "type": "tour",
+        "targetPath": "/merchant/user",
+        "targetLabel": "个人中心",
+        "label": "开始引导"
+      },
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "intent": "GUIDE_NAVIGATION"
+    }
+  },
+  {
+    "row": {
+      "run": 4,
+      "sentence": "怎么前往商家工作台",
+      "http": 200,
+      "wallMs": 1351,
+      "traceId": "4cf932dc-e192-412e-826a-27c863c414cc",
+      "llmUsed": "",
+      "llmLatencyMs": "",
+      "timeout": "false",
+      "timeoutType": "-",
+      "llmFallback": "",
+      "intent": "GUIDE_NAVIGATION",
+      "finalBranch": "",
+      "degradeReason": "",
+      "callOutcome": "",
+      "callLatencyMs": "",
+      "inputTokens": "",
+      "outputTokens": "",
+      "requestId": "",
+      "promptChars": "",
+      "baseChars": "",
+      "routeChars": "",
+      "toolChars": "",
+      "outputChars": "",
+      "pathChars": "",
+      "estTokens": "",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    "trace": {},
+    "call": {},
+    "prompt": {},
+    "body": {
+      "success": true,
+      "action": {
+        "type": "tour",
+        "targetPath": "/merchant/user",
+        "targetLabel": "个人中心",
+        "label": "开始引导"
+      },
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "intent": "GUIDE_NAVIGATION"
+    }
+  },
+  {
+    "row": {
+      "run": 5,
+      "sentence": "怎么前往商家工作台",
+      "http": 200,
+      "wallMs": 1215,
+      "traceId": "43042af4-6ebc-4b8c-bba2-051fe33417cd",
+      "llmUsed": "",
+      "llmLatencyMs": "",
+      "timeout": "false",
+      "timeoutType": "-",
+      "llmFallback": "",
+      "intent": "GUIDE_NAVIGATION",
+      "finalBranch": "",
+      "degradeReason": "",
+      "callOutcome": "",
+      "callLatencyMs": "",
+      "inputTokens": "",
+      "outputTokens": "",
+      "requestId": "",
+      "promptChars": "",
+      "baseChars": "",
+      "routeChars": "",
+      "toolChars": "",
+      "outputChars": "",
+      "pathChars": "",
+      "estTokens": "",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    "trace": {},
+    "call": {},
+    "prompt": {},
+    "body": {
+      "success": true,
+      "action": {
+        "type": "tour",
+        "targetPath": "/merchant/user",
+        "targetLabel": "个人中心",
+        "label": "开始引导"
+      },
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "intent": "GUIDE_NAVIGATION"
+    }
+  },
+  {
+    "row": {
+      "run": 6,
+      "sentence": "怎么前往商家工作台",
+      "http": 200,
+      "wallMs": 3045,
+      "traceId": "916dfec4-c946-4e21-9986-276705f60ccc",
+      "llmUsed": "",
+      "llmLatencyMs": "",
+      "timeout": "false",
+      "timeoutType": "-",
+      "llmFallback": "",
+      "intent": "UNKNOWN",
+      "finalBranch": "",
+      "degradeReason": "",
+      "callOutcome": "",
+      "callLatencyMs": "",
+      "inputTokens": "",
+      "outputTokens": "",
+      "requestId": "",
+      "promptChars": "",
+      "baseChars": "",
+      "routeChars": "",
+      "toolChars": "",
+      "outputChars": "",
+      "pathChars": "",
+      "estTokens": "",
+      "reply": "我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。"
+    },
+    "trace": {},
+    "call": {},
+    "prompt": {},
+    "body": {
+      "success": true,
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。",
+      "intent": "UNKNOWN"
+    }
+  },
+  {
+    "row": {
+      "run": 7,
+      "sentence": "怎么前往商家工作台",
+      "http": 200,
+      "wallMs": 1297,
+      "traceId": "95d9d9c7-5781-41d9-8a19-8d834c8f8083",
+      "llmUsed": "",
+      "llmLatencyMs": "",
+      "timeout": "false",
+      "timeoutType": "-",
+      "llmFallback": "",
+      "intent": "GUIDE_NAVIGATION",
+      "finalBranch": "",
+      "degradeReason": "",
+      "callOutcome": "",
+      "callLatencyMs": "",
+      "inputTokens": "",
+      "outputTokens": "",
+      "requestId": "",
+      "promptChars": "",
+      "baseChars": "",
+      "routeChars": "",
+      "toolChars": "",
+      "outputChars": "",
+      "pathChars": "",
+      "estTokens": "",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    "trace": {},
+    "call": {},
+    "prompt": {},
+    "body": {
+      "success": true,
+      "action": {
+        "type": "tour",
+        "targetPath": "/merchant/user",
+        "targetLabel": "个人中心",
+        "label": "开始引导"
+      },
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "intent": "GUIDE_NAVIGATION"
+    }
+  },
+  {
+    "row": {
+      "run": 8,
+      "sentence": "怎么前往商家工作台",
+      "http": 200,
+      "wallMs": 1170,
+      "traceId": "75b03add-a7b7-46c0-97fe-b72b09e44524",
+      "llmUsed": "",
+      "llmLatencyMs": "",
+      "timeout": "false",
+      "timeoutType": "-",
+      "llmFallback": "",
+      "intent": "GUIDE_NAVIGATION",
+      "finalBranch": "",
+      "degradeReason": "",
+      "callOutcome": "",
+      "callLatencyMs": "",
+      "inputTokens": "",
+      "outputTokens": "",
+      "requestId": "",
+      "promptChars": "",
+      "baseChars": "",
+      "routeChars": "",
+      "toolChars": "",
+      "outputChars": "",
+      "pathChars": "",
+      "estTokens": "",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    "trace": {},
+    "call": {},
+    "prompt": {},
+    "body": {
+      "success": true,
+      "action": {
+        "type": "tour",
+        "targetPath": "/merchant/user",
+        "targetLabel": "个人中心",
+        "label": "开始引导"
+      },
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "intent": "GUIDE_NAVIGATION"
+    }
+  },
+  {
+    "row": {
+      "run": 9,
+      "sentence": "怎么前往商家工作台",
+      "http": 200,
+      "wallMs": 1089,
+      "traceId": "cd2df21b-0a74-4c45-9d2c-a4a03dc8d65f",
+      "llmUsed": "",
+      "llmLatencyMs": "",
+      "timeout": "false",
+      "timeoutType": "-",
+      "llmFallback": "",
+      "intent": "GUIDE_NAVIGATION",
+      "finalBranch": "",
+      "degradeReason": "",
+      "callOutcome": "",
+      "callLatencyMs": "",
+      "inputTokens": "",
+      "outputTokens": "",
+      "requestId": "",
+      "promptChars": "",
+      "baseChars": "",
+      "routeChars": "",
+      "toolChars": "",
+      "outputChars": "",
+      "pathChars": "",
+      "estTokens": "",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    "trace": {},
+    "call": {},
+    "prompt": {},
+    "body": {
+      "success": true,
+      "action": {
+        "type": "tour",
+        "targetPath": "/merchant/user",
+        "targetLabel": "个人中心",
+        "label": "开始引导"
+      },
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "intent": "GUIDE_NAVIGATION"
+    }
+  },
+  {
+    "row": {
+      "run": 10,
+      "sentence": "怎么前往商家工作台",
+      "http": 200,
+      "wallMs": 1243,
+      "traceId": "e2322b75-ebc8-4bec-b3ec-1277c36c8547",
+      "llmUsed": "",
+      "llmLatencyMs": "",
+      "timeout": "false",
+      "timeoutType": "-",
+      "llmFallback": "",
+      "intent": "GUIDE_NAVIGATION",
+      "finalBranch": "",
+      "degradeReason": "",
+      "callOutcome": "",
+      "callLatencyMs": "",
+      "inputTokens": "",
+      "outputTokens": "",
+      "requestId": "",
+      "promptChars": "",
+      "baseChars": "",
+      "routeChars": "",
+      "toolChars": "",
+      "outputChars": "",
+      "pathChars": "",
+      "estTokens": "",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    "trace": {},
+    "call": {},
+    "prompt": {},
+    "body": {
+      "success": true,
+      "action": {
+        "type": "tour",
+        "targetPath": "/merchant/user",
+        "targetLabel": "个人中心",
+        "label": "开始引导"
+      },
+      "suggestions": [
+        "查我的订单",
+        "查售后进度",
+        "怎么开店"
+      ],
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "intent": "GUIDE_NAVIGATION"
+    }
+  }
+]

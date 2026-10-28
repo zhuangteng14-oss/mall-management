@@ -1,0 +1,227 @@
+{
+  "summary": {
+    "runs": 10,
+    "http200": 10,
+    "intentMerchantDashboard": 0,
+    "targetMerchantUser": 0,
+    "llmTimeouts": 0,
+    "traceCount": 10,
+    "wallMsList": [
+      4998,
+      4272,
+      2290,
+      2081,
+      2838,
+      3633,
+      3613,
+      2609,
+      2421,
+      1442
+    ],
+    "pass": false
+  },
+  "rows": [
+    {
+      "n": 1,
+      "http": 200,
+      "wallMs": 4998,
+      "success": true,
+      "intent": "GUIDE_NAVIGATION",
+      "targetPath": "/merchant/after-sales",
+      "actionType": "tour",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    {
+      "n": 2,
+      "http": 200,
+      "wallMs": 4272,
+      "success": true,
+      "intent": "GUIDE_NAVIGATION",
+      "targetPath": "/merchant/after-sales",
+      "actionType": "tour",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    {
+      "n": 3,
+      "http": 200,
+      "wallMs": 2290,
+      "success": true,
+      "intent": "GUIDE_NAVIGATION",
+      "targetPath": "/merchant/after-sales",
+      "actionType": "tour",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    {
+      "n": 4,
+      "http": 200,
+      "wallMs": 2081,
+      "success": true,
+      "intent": "GUIDE_NAVIGATION",
+      "targetPath": "/merchant/after-sales",
+      "actionType": "tour",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    {
+      "n": 5,
+      "http": 200,
+      "wallMs": 2838,
+      "success": true,
+      "intent": "GUIDE_NAVIGATION",
+      "targetPath": "/merchant/after-sales",
+      "actionType": "tour",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    {
+      "n": 6,
+      "http": 200,
+      "wallMs": 3633,
+      "success": true,
+      "intent": "GUIDE_NAVIGATION",
+      "targetPath": "/merchant/after-sales",
+      "actionType": "tour",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    {
+      "n": 7,
+      "http": 200,
+      "wallMs": 3613,
+      "success": true,
+      "intent": "GUIDE_NAVIGATION",
+      "targetPath": "/merchant/after-sales",
+      "actionType": "tour",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    {
+      "n": 8,
+      "http": 200,
+      "wallMs": 2609,
+      "success": true,
+      "intent": "GUIDE_NAVIGATION",
+      "targetPath": "/merchant/after-sales",
+      "actionType": "tour",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    {
+      "n": 9,
+      "http": 200,
+      "wallMs": 2421,
+      "success": true,
+      "intent": "GUIDE_NAVIGATION",
+      "targetPath": "/merchant/after-sales",
+      "actionType": "tour",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    },
+    {
+      "n": 10,
+      "http": 200,
+      "wallMs": 1442,
+      "success": true,
+      "intent": "GUIDE_NAVIGATION",
+      "targetPath": "/merchant/after-sales",
+      "actionType": "tour",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。"
+    }
+  ],
+  "traces": [
+    {
+      "intent": "GUIDE_NAVIGATION",
+      "llmUsed": "true",
+      "llmFallback": "none",
+      "llmLatencyMs": "4863",
+      "llmTimeoutType": "none",
+      "totalLatencyMs": "4996",
+      "finalBranch": "tool:navigate",
+      "degradeReason": "none"
+    },
+    {
+      "intent": "GUIDE_NAVIGATION",
+      "llmUsed": "true",
+      "llmFallback": "none",
+      "llmLatencyMs": "4268",
+      "llmTimeoutType": "none",
+      "totalLatencyMs": "4269",
+      "finalBranch": "tool:navigate",
+      "degradeReason": "none"
+    },
+    {
+      "intent": "GUIDE_NAVIGATION",
+      "llmUsed": "true",
+      "llmFallback": "none",
+      "llmLatencyMs": "2287",
+      "llmTimeoutType": "none",
+      "totalLatencyMs": "2287",
+      "finalBranch": "tool:navigate",
+      "degradeReason": "none"
+    },
+    {
+      "intent": "GUIDE_NAVIGATION",
+      "llmUsed": "true",
+      "llmFallback": "none",
+      "llmLatencyMs": "2076",
+      "llmTimeoutType": "none",
+      "totalLatencyMs": "2076",
+      "finalBranch": "tool:navigate",
+      "degradeReason": "none"
+    },
+    {
+      "intent": "GUIDE_NAVIGATION",
+      "llmUsed": "true",
+      "llmFallback": "none",
+      "llmLatencyMs": "2834",
+      "llmTimeoutType": "none",
+      "totalLatencyMs": "2834",
+      "finalBranch": "tool:navigate",
+      "degradeReason": "none"
+    },
+    {
+      "intent": "GUIDE_NAVIGATION",
+      "llmUsed": "true",
+      "llmFallback": "none",
+      "llmLatencyMs": "3628",
+      "llmTimeoutType": "none",
+      "totalLatencyMs": "3628",
+      "finalBranch": "tool:navigate",
+      "degradeReason": "none"
+    },
+    {
+      "intent": "GUIDE_NAVIGATION",
+      "llmUsed": "true",
+      "llmFallback": "none",
+      "llmLatencyMs": "3607",
+      "llmTimeoutType": "none",
+      "totalLatencyMs": "3607",
+      "finalBranch": "tool:navigate",
+      "degradeReason": "none"
+    },
+    {
+      "intent": "GUIDE_NAVIGATION",
+      "llmUsed": "true",
+      "llmFallback": "none",
+      "llmLatencyMs": "2603",
+      "llmTimeoutType": "none",
+      "totalLatencyMs": "2604",
+      "finalBranch": "tool:navigate",
+      "degradeReason": "none"
+    },
+    {
+      "intent": "GUIDE_NAVIGATION",
+      "llmUsed": "true",
+      "llmFallback": "none",
+      "llmLatencyMs": "2266",
+      "llmTimeoutType": "none",
+      "totalLatencyMs": "2416",
+      "finalBranch": "tool:navigate",
+      "degradeReason": "none"
+    },
+    {
+      "intent": "GUIDE_NAVIGATION",
+      "llmUsed": "true",
+      "llmFallback": "none",
+      "llmLatencyMs": "1434",
+      "llmTimeoutType": "none",
+      "totalLatencyMs": "1434",
+      "finalBranch": "tool:navigate",
+      "degradeReason": "none"
+    }
+  ]
+}

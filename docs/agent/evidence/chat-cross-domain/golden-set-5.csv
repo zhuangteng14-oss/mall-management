@@ -1,0 +1,6 @@
+id,question,role,current_path,expected_intent,expected_action_prefix,note
+B01,oppo12这商品在哪购买？,1,/customer,GOODS_QUERY,/customer/search?kw=oppo12,型号 + 在哪购买（用户实测原句）
+B02,我想买个护膝,1,/customer,GOODS_QUERY,/customer/search?kw=%E6%8A%A4%E8%86%9D,中文商品名 + 想买
+B03,怎么搜索蓝牙耳机,1,/customer,GOODS_QUERY,/customer/search?kw=%E8%93%9D%E7%89%99%E8%80%B3%E6%9C%BA,搜索动作 + 中文商品名
+B04,这手机多少钱,1,/customer,GOODS_QUERY,/customer/search?kw=%E6%89%8B%E6%9C%BA,查价；库内无「手机」精确命中时给搜索
+B05,随机乱码连发两次,1,/customer,CLARIFY,,第二次必须换话术且不出现商家选项

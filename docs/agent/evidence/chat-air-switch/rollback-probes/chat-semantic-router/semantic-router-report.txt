@@ -1,0 +1,17 @@
+PASS  商家登录落 /merchant  {"hash":"#/merchant"}
+PASS  「怎么看我上架的商品」⇒ GOODS_MANAGE + /merchant/user/list  {"intent":"GOODS_MANAGE","action":{"type":"tour","targetPath":"/merchant/user/list","targetLabel":"查看商品","label":"开始引导"}}
+PASS  回复只有引导语，无「收藏的商品」幽灵前缀  {"reply":"好的，我来一步步教您。点击下方按钮开始。"}
+PASS  GOODS_MANAGE 的【开始引导】胶囊可点  {"x":1193.3359375,"y":611.1875,"w":264.671875,"h":44}
+PASS  点【开始引导】后出现漫游控制条
+PASS  跳过引导 ⇒ 真落到 /merchant/user/list，漫游消失  {"hash":"#/merchant/user/list","bar":false}
+PASS  「怎么前往商家工作台」⇒ MERCHANT_DASHBOARD + /merchant/user  {"intent":"MERCHANT_DASHBOARD","action":{"type":"tour","targetPath":"/merchant/user","targetLabel":"个人中心","label":"开始引导"}}
+PASS  不再答「听不懂」  {"reply":"好的，我来一步步教您。点击下方按钮开始。"}
+PASS  「我花出去的钱去哪了」⇒ ASSET_QUERY + /merchant/user/member  {"intent":"ASSET_QUERY","action":{"type":"tour","targetPath":"/merchant/user/member","targetLabel":"会员中心","label":"开始引导"}}
+PASS  「今天天气不错」⇒ CLARIFY（相似度 < 0.75 不硬猜）  {"intent":"CLARIFY","reply":"请问您是想查订单、管理商品，还是去工作台？"}
+PASS  澄清时不返回 action（不擅自导航）  {"action":null}
+PASS  「直接带我去管理商品」⇒ GOODS_MANAGE，但动作是 jump  {"intent":"GOODS_MANAGE","action":{"type":"jump","targetPath":"/merchant/user/list","targetLabel":"查看商品","label":"一键直达"}}
+PASS  点【一键直达】⇒ ≤3s 到商品管理页，且全程无漫游  {"elapsed":330,"hash":"#/merchant/user/list"}
+PASS  全程无 pageerror  []
+
+合计 14 项 / 0 失败
+页面截图：C:/Users/86159/Desktop/软件工程/期末项目/docs/agent/evidence/chat-semantic-router

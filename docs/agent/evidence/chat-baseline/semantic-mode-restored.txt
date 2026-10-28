@@ -1,0 +1,4 @@
+重启后验证（dev profile，8088）
+2026-10-24 14:26:05
+HTTP 200  intent=GOODS_MANAGE  action=/merchant/user/list
+2026-10-24 14:26:05.351  INFO 70280 --- [http-nio-8088-exec-5] [8a0ba409-9071-4d4c-aab7-f756635f5fde] c.m.m.chat.service.ChatAgentService      : CHAT_TRACE traceId=8a0ba409-9071-4d4c-aab7-f756635f5fde intent=GOODS_MANAGE semanticScore=0.9168 secondScore=0.8602 semanticConfident=true llmUsed=false llmFallback=semantic_confident toolName=- toolSuccess=- totalLatencyMs=0 finalBranch=switch:GOODS_MANAGE degradeReason=none

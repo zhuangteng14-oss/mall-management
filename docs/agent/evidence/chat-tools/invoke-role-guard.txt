@@ -1,0 +1,2 @@
+POST /chat/tools/invoke  tool=buyer_orders（商家会话；应当被角色闸拒绝）
+{"msg":"工具 buyer_orders 不允许角色 2 调用","success":false}

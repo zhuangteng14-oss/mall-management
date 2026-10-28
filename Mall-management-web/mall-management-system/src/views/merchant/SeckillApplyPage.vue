@@ -15,7 +15,7 @@
     <form class="skl-form" @submit.prevent="submit">
       <div class="skl-field">
         <span class="skl-lbl">商品</span>
-        <select v-model="goodsId" class="skl-input" :disabled="loadingGoods">
+        <select id="tour-seckill-select" v-model="goodsId" class="skl-input" :disabled="loadingGoods">
           <option value="">（请选择本店在架商品）</option>
           <option v-for="g in goodsList" :key="g.Id" :value="String(g.Id)">
             {{ g.GoodName }}（原价 ¥{{ money(g.Price) }}）
@@ -33,7 +33,7 @@
         <input v-model.trim="quantity" class="skl-input" type="text" inputmode="numeric" placeholder="如 20" />
       </div>
 
-      <button class="skl-btn" type="submit" :disabled="submitting || !goodsId">
+      <button id="tour-seckill-submit" class="skl-btn" type="submit" :disabled="submitting || !goodsId">
         {{ submitting ? '提交中…' : '提交报名' }}
       </button>
 
@@ -108,7 +108,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { http } from '../../api/http'
 import { endpoints } from '../../api/endpoints'
 import { getMerchantId } from '../../api/auth'
-import { seckillApply, seckillApplications } from '../../api/marketing'
+import { seckillApply, seckillApplications } from '../../api/marketing'; import { resumeTourFlow } from '../../composables/useTour'
 
 /**
  * `embedded` —— 本页被**当子组件**用时的开关（C3 块 5 · 2026-10-12 用户裁定 ④）。
@@ -230,7 +230,7 @@ const submit = async () => {
   }
 }
 
-onMounted(() => { loadGoods(); loadList() })
+onMounted(() => { loadGoods(); loadList(); resumeTourFlow() })
 </script>
 
 <style scoped>

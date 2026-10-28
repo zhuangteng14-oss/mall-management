@@ -1,0 +1,44 @@
+[
+  {
+    "case": "anonymous-chat-ask",
+    "http": 401,
+    "wallMs": 14,
+    "body": {
+      "success": false,
+      "msg": "未登录"
+    },
+    "raw": "{\"success\":false,\"msg\":\"未登录\"}",
+    "pass": true
+  },
+  {
+    "case": "customer-order-query",
+    "loginRole": "1",
+    "http": 200,
+    "wallMs": 3044,
+    "success": true,
+    "intent": "ORDER_QUERY",
+    "reply": "你最近有 3708 笔订单，最新一笔是「Draft-B7-Demo（单号 BROR943184306407），实付 ¥155.84，下单时间 2026-10-20 21:18:47」。当前状态：已取消。",
+    "dataKeys": [
+      "total",
+      "orders"
+    ],
+    "pass": true
+  },
+  {
+    "case": "merchant-workbench",
+    "loginRole": "2",
+    "http": 200,
+    "wallMs": 17,
+    "success": true,
+    "intent": "MERCHANT_DASHBOARD",
+    "action": {
+      "type": "tour",
+      "targetPath": "/merchant/user",
+      "targetLabel": "个人中心",
+      "label": "开始引导"
+    },
+    "targetPath": "/merchant/user",
+    "reply": "好的，我来一步步教您。点击下方按钮开始。",
+    "pass": true
+  }
+]

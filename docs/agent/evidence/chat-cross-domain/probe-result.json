@@ -1,0 +1,127 @@
+{
+  "total": 7,
+  "passed": 7,
+  "failed": 0,
+  "rows": [
+    {
+      "id": "B01",
+      "question": "oppo12这商品在哪购买？",
+      "role": 1,
+      "expectedIntent": "GOODS_QUERY",
+      "expectedPath": "/customer/search?kw=oppo12",
+      "intent": "GOODS_QUERY",
+      "actionPath": "/customer/search?kw=oppo12",
+      "http": 200,
+      "pass": true,
+      "reply": "为您查到商品「oppo12」，当前售价 ¥1886.00，库存充足，分类 电子用品，正在热卖中。在商城搜索「oppo12」就能看到它，点下面按钮我直接带您去搜索页。",
+      "chips": [
+        "去商城搜索",
+        "带我去商品详情",
+        "查我的订单",
+        "怎么开店"
+      ]
+    },
+    {
+      "id": "B02",
+      "question": "我想买个护膝",
+      "role": 1,
+      "expectedIntent": "GOODS_QUERY",
+      "expectedPath": "/customer/search?kw=%E6%8A%A4%E8%86%9D",
+      "intent": "GOODS_QUERY",
+      "actionPath": "/customer/search?kw=%E6%8A%A4%E8%86%9D",
+      "http": 200,
+      "pass": true,
+      "reply": "为您查到商品「运动加压护膝 一对」，当前售价 ¥69.00，库存以详情页为准，分类 运动用品，正在热卖中。在商城搜索「护膝」就能看到它，点下面按钮我直接带您去搜索页。",
+      "chips": [
+        "去商城搜索",
+        "带我去商品详情",
+        "查我的订单",
+        "怎么开店"
+      ]
+    },
+    {
+      "id": "B03",
+      "question": "怎么搜索蓝牙耳机",
+      "role": 1,
+      "expectedIntent": "GOODS_QUERY",
+      "expectedPath": "/customer/search?kw=%E8%93%9D%E7%89%99%E8%80%B3%E6%9C%BA",
+      "intent": "GOODS_QUERY",
+      "actionPath": "/customer/search?kw=%E8%93%9D%E7%89%99%E8%80%B3%E6%9C%BA",
+      "http": 200,
+      "pass": true,
+      "reply": "找到 3 个相近商品，最匹配的是：为您查到商品「无线蓝牙耳机 声谷标准版」，当前售价 ¥299.00（划线价 ¥373.75），库存以详情页为准，分类 电子用品，正在热卖中。在商城搜索「蓝牙耳机」就能看到它，点下面按钮我直接带您去搜索页。",
+      "chips": [
+        "去商城搜索",
+        "带我去商品详情",
+        "查我的订单",
+        "怎么开店"
+      ]
+    },
+    {
+      "id": "B04",
+      "question": "这手机多少钱",
+      "role": 1,
+      "expectedIntent": "GOODS_QUERY",
+      "expectedPath": "/customer/search?kw=%E6%89%8B%E6%9C%BA",
+      "intent": "GOODS_QUERY",
+      "actionPath": "/customer/search?kw=%E6%89%8B%E6%9C%BA",
+      "http": 200,
+      "pass": true,
+      "reply": "店里暂时没有搜到「手机」，不过商城搜索还能找其他店铺的同款。点下面按钮，我直接带您去搜索页。",
+      "chips": [
+        "去商城搜索",
+        "查我的订单"
+      ]
+    },
+    {
+      "id": "B05",
+      "question": "qzxvbnmplkjhgf → wrtpomsdfghjkl",
+      "role": 1,
+      "expectedIntent": "CLARIFY",
+      "intent": "CLARIFY",
+      "firstReply": "没太听懂您的意思。您可以问我：搜商品、查订单，或者去个人中心。",
+      "secondReply": "抱歉，我还是没太听懂。您可以直接输入商品名称去搜索，或者点下方按钮联系人工客服。",
+      "secondChips": [
+        "去商城搜索",
+        "联系人工客服"
+      ],
+      "pass": true
+    },
+    {
+      "id": "M01",
+      "question": "护膝在哪买",
+      "role": 2,
+      "expectedIntent": "GOODS_QUERY",
+      "expectedPath": "/merchant/search?kw=%E6%8A%A4%E8%86%9D",
+      "intent": "GOODS_QUERY",
+      "actionPath": "/merchant/search?kw=%E6%8A%A4%E8%86%9D",
+      "http": 200,
+      "pass": true,
+      "reply": "为您查到商品「运动加压护膝 一对」，当前售价 ¥69.00，库存以详情页为准，分类 运动用品，正在热卖中。在商城搜索「护膝」就能看到它，点下面按钮我直接带您去搜索页。",
+      "chips": [
+        "去商城搜索",
+        "带我去商品详情",
+        "查我的订单",
+        "怎么开店"
+      ]
+    },
+    {
+      "id": "M02",
+      "question": "帮我找一个蓝牙耳机",
+      "role": 2,
+      "expectedIntent": "GOODS_QUERY",
+      "expectedPath": "/merchant/search?kw=%E8%93%9D%E7%89%99%E8%80%B3%E6%9C%BA",
+      "intent": "GOODS_QUERY",
+      "actionPath": "/merchant/search?kw=%E8%93%9D%E7%89%99%E8%80%B3%E6%9C%BA",
+      "http": 200,
+      "pass": true,
+      "reply": "找到 3 个相近商品，最匹配的是：为您查到商品「无线蓝牙耳机 声谷标准版」，当前售价 ¥299.00（划线价 ¥373.75），库存以详情页为准，分类 电子用品，正在热卖中。在商城搜索「蓝牙耳机」就能看到它，点下面按钮我直接带您去搜索页。",
+      "chips": [
+        "去商城搜索",
+        "带我去商品详情",
+        "查我的订单",
+        "怎么开店"
+      ]
+    }
+  ]
+}

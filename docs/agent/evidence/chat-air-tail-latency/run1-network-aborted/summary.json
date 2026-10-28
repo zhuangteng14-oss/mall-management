@@ -1,0 +1,40 @@
+{
+  "runs_per_model": 50,
+  "question": "怎么前往商家工作台",
+  "promptChars": 4414,
+  "percentile": "nearest-rank",
+  "models": {
+    "glm-4-air": {
+      "n": 50,
+      "ok": 17,
+      "http_error": 0,
+      "timeout": 0,
+      "would_timeout_3s": 1,
+      "over_3s": 1,
+      "over_5s": 1,
+      "min": 1064,
+      "p50": 1255,
+      "p95": 3556,
+      "p99": 3556,
+      "max": 3556,
+      "mean": 1495.8
+    },
+    "glm-4-flash": {
+      "n": 50,
+      "ok": 16,
+      "http_error": 0,
+      "timeout": 1,
+      "would_timeout_3s": 11,
+      "over_3s": 12,
+      "over_5s": 11,
+      "min": 1979,
+      "p50": 3509,
+      "p95": 27859,
+      "p99": 27859,
+      "max": 27859,
+      "mean": 7088.1
+    }
+  },
+  "over3_diff_air_minus_flash": -11,
+  "verdict": "样本不足：50 次仍无法区分，建议放宽到 5 秒再评估"
+}

@@ -1,0 +1,50 @@
+{
+  "summary": {
+    "runs": 3,
+    "http200": 3,
+    "dedicatedIntentOk": 0,
+    "pathOk": 3,
+    "pass": true
+  },
+  "rows": [
+    {
+      "q": "怎么前往商家工作台",
+      "http": 200,
+      "wallMs": 1688,
+      "intent": "GUIDE_NAVIGATION",
+      "actionType": "tour",
+      "targetPath": "/merchant/user",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "expectedIntent": "MERCHANT_DASHBOARD",
+      "expectedPath": "/merchant/user",
+      "dedicatedIntentOk": false,
+      "pathOk": true
+    },
+    {
+      "q": "怎么看我上架的商品",
+      "http": 200,
+      "wallMs": 1401,
+      "intent": "GUIDE_NAVIGATION",
+      "actionType": "tour",
+      "targetPath": "/merchant/user/list",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "expectedIntent": "GOODS_MANAGE",
+      "expectedPath": "/merchant/user/list",
+      "dedicatedIntentOk": false,
+      "pathOk": true
+    },
+    {
+      "q": "我要管理我的钱",
+      "http": 200,
+      "wallMs": 1628,
+      "intent": "GUIDE_NAVIGATION",
+      "actionType": "tour",
+      "targetPath": "/merchant/user/member",
+      "reply": "好的，我来一步步教您。点击下方按钮开始。",
+      "expectedIntent": "ASSET_QUERY",
+      "expectedPath": "/merchant/user/member",
+      "dedicatedIntentOk": false,
+      "pathOk": true
+    }
+  ]
+}
