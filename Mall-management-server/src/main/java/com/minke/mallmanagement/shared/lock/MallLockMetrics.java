@@ -36,9 +36,12 @@ import java.util.function.BooleanSupplier;
  *        degraded = 冷却窗口内**根本没尝试**（Redis 已知不可达，零网络代价）；
  *        error    = 尝试抛异常（连接失败/超时，被吞掉并转入冷却）。
  * mall.lock.wait.duration{lock}
- *        取锁墙钟（Timer）。「等没等、等多久」是它的派生量（规范第 6 条），故只在**真尝试过**
- *        的两路（acquired / timeout）记录 —— degraded 根本没碰网络，给它记 0 会把
- *        「没尝试」混进「等了 0 秒」。MAX 回答「争用最坏等了多久」。
+ *        取锁墙钟（Timer）。只在**真尝试过**的两路（acquired / timeout）记录 —— degraded
+ *        根本没碰网络，给它记 0 会把「没尝试」混进「等了 0 秒」。MAX 回答「争用最坏等了多久」。
+ * mall.lock.waited{lock}
+ *        取锁墙钟 ≥ {@link #CONTENDED_NANOS} 的**次数**（Counter）。⚠️ 它不是 wait.duration 的
+ *        重复埋点：Timer 的 count / total / max 三个聚合**取不出「等超过阈值的有几次」**
+ *        （那要直方图），而面板「锁等待次数」要的正是这个次数。阈值见常量处的实测依据。
  * mall.lock.holds{lock,result=released|lease_lost|error}
  *        一次**释放**的结果。lease_lost = finally 里 isHeldByCurrentThread() 为假
  *        ⇒ 临界区跑赢了 leaseTime、锁已被别人拿走 —— 这是**双写风险的探测器**，故单列。
@@ -72,6 +75,20 @@ public class MallLockMetrics {
     static final String WAIT = "mall.lock.wait.duration";
     static final String HOLDS = "mall.lock.holds";
     static final String UP = "mall.lock.up";
+    static final String WAITED = "mall.lock.waited";
+
+    /**
+     * 「真排过队」的判定线：取锁墙钟 ≥ 5 ms。
+     *
+     * <p>依据是 2026-10-31 本机实测（默认 profile、本机 loopback Redis）：常规流量下每次取锁均值
+     * 0.25–0.5 ms（200 并发 30 秒一轮 = 6,199 次取锁 / 最大 7 ms）；真排队时「锁等待」折线的拍均值
+     * 峰值到 {@code order-add} 25.7 ms ⇒ 5 ms 夹在两者之间、比基线高一个量级。取 1 ms 会把
+     * Redis 往返 + 线程调度的空转抖动也算成等待（基线本身就在 0.25–0.5 ms 一带）。
+     *
+     * <p>⚠️ 写死、不做配置项：它描述的是「本地 Redis 空转往返 + 线程调度」的量级，不是业务可调参数。
+     * 换成远端 Redis 应**重新实测**这个数，而不是把旧值挪进 properties。
+     */
+    static final long CONTENDED_NANOS = TimeUnit.MILLISECONDS.toNanos(5);
 
     /** 事件流容量：2 的幂（定位用位与，不用取模）。同 C1 —— 2048 条 ≈ 每秒千条量级下 2 秒的窗口。 */
     private static final int EVENT_CAPACITY = 2048;
@@ -111,6 +128,11 @@ public class MallLockMetrics {
         registry.counter(ACQUIRES, "lock", lock, "result", result.tag).increment();
         if (result == Outcome.ACQUIRED || result == Outcome.TIMEOUT) {
             registry.timer(WAIT, "lock", lock).record(waitNanos, TimeUnit.NANOSECONDS);
+            // 面板「锁等待次数」的取数处：只有**真排过队**（≥ CONTENDED_NANOS）才算一次等待 ——
+            // 「拿到了锁」不等于「没等」，而这正是 timeout 口径看不见的那部分争用。
+            if (waitNanos >= CONTENDED_NANOS) {
+                registry.counter(WAITED, "lock", lock).increment();
+            }
         }
         // 块 7 · 阶段 3a.3：耗时**已经算好**（DistributedLockService 的 startNanos/elapsed），带出来即可。
         // ⚠️ DEGRADED 那一路的 0L 不是「等了 0 秒」，是「在 startNanos 之前就返回了、压根没尝试」

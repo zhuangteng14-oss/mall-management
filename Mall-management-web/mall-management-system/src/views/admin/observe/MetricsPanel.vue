@@ -145,11 +145,11 @@
         <section class="mp-chart mp-chart--last">
           <div class="mp-chart-h">
             <h3>锁竞争热力图</h3>
-            <span class="mp-chart-n">行 = 锁名 · 列 = 最近 {{ WINDOW }} 拍 · 越深 = 本拍超时越多</span>
+            <span class="mp-chart-n">行 = 锁名 · 列 = 最近 {{ WINDOW }} 拍 · 越深 = 本拍排队取锁越多</span>
           </div>
           <HeatmapChart
-            :x-labels="xLabels" :y-labels="lockAxisLabels" :data="heatData" value-name="超时数"
-            height="190px" :legend-text="['超时多', '超时少']" :x-label-interval="heatInterval"
+            :x-labels="xLabels" :y-labels="lockAxisLabels" :data="heatData" value-name="等待数"
+            height="190px" :legend-text="['等待多', '等待少']" :x-label-interval="heatInterval"
             :grid-left="64" :grid-right="56" :tooltip-formatter="heatTooltip" :animation="false"
             :loading="first" :error="errMsg"
             empty-text="窗口内没有任何锁活动" @retry="connect"
@@ -191,7 +191,7 @@
             <div class="mp-kpi">
               <span class="mp-kpi-k">锁等待次数</span>
               <span class="mp-kpi-v"><b>{{ first ? '—' : fmtInt(Math.round(shown.lockWait)) }}</b><em>次</em></span>
-              <span class="mp-kpi-d">全部锁名本拍 timeouts 之和</span>
+              <span class="mp-kpi-d">本拍取锁耗时 ≥5ms 的次数（各锁之和）</span>
               <span class="mp-kpi-nospark">无序列</span>
             </div>
           </div>
@@ -1068,7 +1068,7 @@ const heatData = computed(() => {
   rows.value.forEach((r, x) => {
     names.forEach((n, y) => {
       const l = r.locks[n]
-      if (l !== undefined) out.push([x, y, l.timeouts])
+      if (l !== undefined) out.push([x, y, l.waited])
     })
   })
   return out
@@ -1168,9 +1168,9 @@ function heatTooltip(p) {
   const r = rows.value[x]
   const l = r && r.locks[name]
   let s = `<b>${esc(lockLabel(name))}</b>（${esc(name)}） · 第 ${x + 1} 拍`
-    + `${xLabels.value[x] ? '（' + xLabels.value[x] + '）' : ''} · 超时 ${fmtInt(val)} 次`
+    + `${xLabels.value[x] ? '（' + xLabels.value[x] + '）' : ''} · 等待 ${fmtInt(val)} 次（≥5ms）`
   if (l) {
-    s += `<br/>取锁 ${fmtInt(l.acquires)} · 成功 ${fmtInt(l.acquired)}`
+    s += `<br/>取锁 ${fmtInt(l.acquires)} · 成功 ${fmtInt(l.acquired)} · 超时 ${fmtInt(l.timeouts)}`
       + ` · 降级 ${fmtInt(l.degraded)} · 错误 ${fmtInt(l.errors)}`
   }
   return s
@@ -1395,6 +1395,7 @@ function toRow(f) {
   const locks = Array.isArray(f.locks) ? f.locks : []
 
   const lockMap = {}
+  let lockWaits = 0
   let lockTimeouts = 0
   for (const l of locks) {
     const name = String(l.lock)
@@ -1402,11 +1403,13 @@ function toRow(f) {
       acquires: num(l.acquires),
       acquired: num(l.acquired),
       timeouts: num(l.timeouts),
+      waited: num(l.waited),
       degraded: num(l.degraded),
       errors: num(l.errors),
       waitMeanMs: l.waitMeanMs === null || l.waitMeanMs === undefined ? null : num(l.waitMeanMs),
     }
     lockMap[name] = row
+    lockWaits += row.waited
     lockTimeouts += row.timeouts
   }
 
@@ -1427,6 +1430,7 @@ function toRow(f) {
     hitRate: cache.hitRate === null || cache.hitRate === undefined ? null : num(cache.hitRate),
     health: (f.health && f.health.level) || 'ok',
     locks: lockMap,
+    lockWaits,
     lockTimeouts,
   }
 }
@@ -1473,7 +1477,7 @@ function onFrame(f) {
         qps: row.qps,
         mean: row.meanMs === null ? 0 : row.meanMs,
         hitRate: row.hitRate === null ? 0 : row.hitRate,
-        lockWait: row.lockTimeouts,
+        lockWait: row.lockWaits,
       })
     }
   }
@@ -1581,7 +1585,7 @@ onActivated(() => {
       qps: lastRow.qps,
       mean: lastRow.meanMs === null ? 0 : lastRow.meanMs,
       hitRate: lastRow.hitRate === null ? 0 : lastRow.hitRate,
-      lockWait: lastRow.lockTimeouts,
+      lockWait: lastRow.lockWaits,
     })
   }
 })

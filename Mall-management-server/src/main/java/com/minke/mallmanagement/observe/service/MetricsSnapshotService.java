@@ -82,11 +82,13 @@ public class MetricsSnapshotService {
     private static final String CACHE_L2 = "mall.cache.l2.requests";
     /** {@code shared/cache/MallCacheMetrics.java:109}（gauge，无 tag） */
     private static final String CACHE_L2_UP = "mall.cache.l2.up";
-    /** {@code shared/lock/MallLockMetrics.java:71}（tag：lock / result） */
+    /** {@code shared/lock/MallLockMetrics.java:74}（tag：lock / result） */
     private static final String LOCK_ACQUIRES = "mall.lock.acquires";
-    /** {@code shared/lock/MallLockMetrics.java:72}（tag：lock） */
+    /** {@code shared/lock/MallLockMetrics.java:75}（tag：lock） */
     private static final String LOCK_WAIT = "mall.lock.wait.duration";
-    /** {@code shared/lock/MallLockMetrics.java:74}（gauge，无 tag） */
+    /** {@code shared/lock/MallLockMetrics.java:78}（tag：lock）—— 「真排过队」的取锁次数 */
+    private static final String LOCK_WAITED = "mall.lock.waited";
+    /** {@code shared/lock/MallLockMetrics.java:77}（gauge，无 tag） */
     private static final String LOCK_UP = "mall.lock.up";
     /** {@code order/metrics/MallOrderStateMetrics.java:104}（tag：action / result） */
     private static final String ORDER_TRANSITIONS = "mall.order.state.transitions";
@@ -328,7 +330,16 @@ public class MetricsSnapshotService {
             return out;
         }
 
-        /** 锁段：每个锁名一拍一行（页面拿它画「锁名 × 时间」的竞争热力图）。 */
+        /**
+         * 锁段：每个锁名一拍一行（页面拿它画「锁名 × 时间」的竞争热力图）。
+         *
+         * <p>⚠️ {@code waited} 是本拍**真排过队**的取锁次数（{@code mall.lock.waited}，阈值
+         * {@code MallLockMetrics.CONTENDED_NANOS}），页面「锁等待次数」与热力图的取数来源。
+         * 它不是 {@code timeouts} 的重命名：{@code wait=5s} 对毫秒级临界区有上千倍余量 ⇒
+         * 超时几乎不会发生，只凭 {@code timeouts} 画图会**永远空白**（2026-10-31 实测：
+         * 200 并发 30 秒、6,199 次取锁、超时 0；同一时段的 {@code waited} 是 5 次，
+         * 默认 8 场景的一轮则是 741 次 —— 争用全落在 5 ms 与 5 s 之间，两个聚合口径都看不见它）。
+         */
         private List<Map<String, Object>> locks() {
             Map<String, Map<String, Object>> byLock = new LinkedHashMap<>();
             for (Counter c : registry.find(LOCK_ACQUIRES).counters()) {
@@ -337,17 +348,7 @@ public class MetricsSnapshotService {
                 if (lock == null || result == null) {
                     continue;
                 }
-                Map<String, Object> row = byLock.computeIfAbsent(lock, k -> {
-                    Map<String, Object> r = new LinkedHashMap<>();
-                    r.put("lock", k);
-                    r.put("acquires", 0L);
-                    r.put("acquired", 0L);
-                    r.put("timeouts", 0L);
-                    r.put("degraded", 0L);
-                    r.put("errors", 0L);
-                    r.put("waitMeanMs", null);
-                    return r;
-                });
+                Map<String, Object> row = byLock.computeIfAbsent(lock, this::lockRow);
                 double d = delta(key(LOCK_ACQUIRES, lock + "|" + result), c.count());
                 bump(row, "acquires", d);
                 switch (result) {
@@ -365,6 +366,14 @@ public class MetricsSnapshotService {
                         break;
                 }
             }
+            for (Counter c : registry.find(LOCK_WAITED).counters()) {
+                String lock = c.getId().getTag("lock");
+                if (lock == null) {
+                    continue;
+                }
+                Map<String, Object> row = byLock.computeIfAbsent(lock, this::lockRow);
+                bump(row, "waited", delta(key(LOCK_WAITED, lock), c.count()));
+            }
             for (Timer t : registry.find(LOCK_WAIT).timers()) {
                 String lock = t.getId().getTag("lock");
                 if (lock == null) {
@@ -372,20 +381,24 @@ public class MetricsSnapshotService {
                 }
                 double dCount = delta(key(LOCK_WAIT, lock + "|count"), t.count());
                 double dMs = delta(key(LOCK_WAIT, lock + "|totalMs"), t.totalTime(TimeUnit.MILLISECONDS));
-                Map<String, Object> row = byLock.computeIfAbsent(lock, k -> {
-                    Map<String, Object> r = new LinkedHashMap<>();
-                    r.put("lock", k);
-                    r.put("acquires", 0L);
-                    r.put("acquired", 0L);
-                    r.put("timeouts", 0L);
-                    r.put("degraded", 0L);
-                    r.put("errors", 0L);
-                    r.put("waitMeanMs", null);
-                    return r;
-                });
+                Map<String, Object> row = byLock.computeIfAbsent(lock, this::lockRow);
                 row.put("waitMeanMs", dCount <= 0 ? null : round(dMs / dCount));
             }
             return new ArrayList<>(byLock.values());
+        }
+
+        /** 锁段一行的初始形状（三个指标族共用；新增字段只加这一处，别在三个循环里各抄一份）。 */
+        private Map<String, Object> lockRow(String lock) {
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("lock", lock);
+            r.put("acquires", 0L);
+            r.put("acquired", 0L);
+            r.put("timeouts", 0L);
+            r.put("waited", 0L);
+            r.put("degraded", 0L);
+            r.put("errors", 0L);
+            r.put("waitMeanMs", null);
+            return r;
         }
 
         /**

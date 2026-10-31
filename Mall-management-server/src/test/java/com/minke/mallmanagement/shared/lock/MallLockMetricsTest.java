@@ -100,6 +100,22 @@ class MallLockMetricsTest {
                 .as("但事件流里必须能看出是哪一单").containsExactly("ORDER-1", "ORDER-2");
     }
 
+    @Test
+    @DisplayName("waited 只数「真排过队」的取锁（墙钟 ≥ 5ms）：超时必算、亚毫秒与 degraded/error 不算")
+    void waitedCountsOnlyContendedAcquires() {
+        metrics.acquire(LOCK, BIZ, Outcome.ACQUIRED, TimeUnit.MILLISECONDS.toNanos(1), null);
+        metrics.acquire(LOCK, BIZ, Outcome.ACQUIRED, TimeUnit.MILLISECONDS.toNanos(60), null);
+        metrics.acquire(LOCK, BIZ, Outcome.TIMEOUT, TimeUnit.MILLISECONDS.toNanos(5000),
+                "取锁超时：等待 5000 ms 未获得");
+        metrics.acquire(LOCK, BIZ, Outcome.DEGRADED, 0L, "锁客户端不可用：降级冷却期内跳过取锁");
+        metrics.acquire(LOCK, BIZ, Outcome.ERROR, TimeUnit.MILLISECONDS.toNanos(900),
+                "取锁异常：IllegalStateException：db down");
+
+        assertThat(count(MallLockMetrics.WAITED, "lock", LOCK))
+                .as("60ms + 5000ms 两次；1ms 是空闲抖动、degraded 没碰网络、error 不计入等待")
+                .isEqualTo(2.0);
+    }
+
     // ================= holds =================
 
     @Test

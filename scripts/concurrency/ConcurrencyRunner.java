@@ -1444,7 +1444,7 @@ public class ConcurrencyRunner {
      * S2a —— 20 线程同栅栏、同 OrderId 下单。三条断言各证一层（2026-09-30 S1a 拆分）：
      * <ul>
      *   <li><b>1a</b> 锁指标增量 == 20 —— 证「锁真的被取到 20 次」。用场景前后增量而非字面 == 20：
-     *       {@code mall.lock.acquires} 是**进程级累计**计数器（{@code MallLockMetrics:109}
+     *       {@code mall.lock.acquires} 是**进程级累计**计数器（{@code MallLockMetrics:128}
      *       {@code registry.counter(...).increment()}），且 S1 等更早的场景也打过同一把锁。</li>
      *   <li><b>1b</b> rows == 1 —— DB 层兜底。⚠️ 唯一索引落地后它**恒真**，故单靠它已不足以证修复；
      *       它的价值退化为「没插重复行」的必要条件。</li>

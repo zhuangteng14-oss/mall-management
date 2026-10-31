@@ -85,6 +85,31 @@ class MetricsSnapshotServiceTest {
     }
 
     @Test
+    @DisplayName("锁段带 waited：timeouts=0 的争用也能画出来（面板「锁等待次数」不许再恒 0）")
+    void lockRowsExposeWaitedSeparatelyFromTimeouts() {
+        when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
+        registry.counter("mall.lock.acquires", "lock", "order-add", "result", "acquired").increment(10);
+        frames.frame(0);                                  // 先拍一次，进 primed 状态
+
+        // 本拍：10 次取锁全部成功（timeouts=0），其中 7 次在 Redis 上排队 ≥5ms
+        registry.counter("mall.lock.acquires", "lock", "order-add", "result", "acquired").increment(10);
+        registry.counter("mall.lock.waited", "lock", "order-add").increment(7);
+        Timer wait = registry.timer("mall.lock.wait.duration", "lock", "order-add");
+        for (int i = 0; i < 10; i++) {
+            wait.record(24, TimeUnit.MILLISECONDS);        // 10 次共 240ms ⇒ 均值 24ms
+        }
+
+        Map<String, Object> frame = frames.frame(1);
+        Map<String, Object> row = lockRowOf(frame, "order-add");
+
+        assertThat(row).containsEntry("acquires", 10L).containsEntry("acquired", 10L)
+                .containsEntry("waited", 7L);
+        // ⚠️ 若 waited 落在超时口径上，这一行会是 0 —— 本用例就是钉这一点
+        assertThat(row).as("本次没有一次取锁超时，但确实排了队").containsEntry("timeouts", 0L);
+        assertThat(row.get("waitMeanMs")).as("均值只由本拍的 wait.duration 增量算出").isEqualTo(24.0);
+    }
+
+    @Test
     @DisplayName("中途新出现的计数器：**它现在的值就是本拍增量**（不当作「没有上一拍」而丢掉）")
     void newlyAppearingCounterCountsAsItsCurrentValue() {
         when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
@@ -415,6 +440,14 @@ class MetricsSnapshotServiceTest {
     @SuppressWarnings("unchecked")
     private static Map<String, Object> stockOf(Map<String, Object> frame) {
         return (Map<String, Object>) frame.get("stock");
+    }
+
+    /** 锁段里按锁名取那一行（`locks` 是 List&lt;Map&gt;，不是按名索引的 Map）。 */
+    private static Map<String, Object> lockRowOf(Map<String, Object> frame, String lock) {
+        return rowsOf(frame, "locks").stream()
+                .filter(r -> lock.equals(r.get("lock")))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("锁段里没有这一把锁：" + lock));
     }
 
     @SuppressWarnings("unchecked")

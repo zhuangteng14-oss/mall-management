@@ -624,8 +624,8 @@ function ordersFrame(w, nowMs, n) {
  * ⚠️ 形状**逐键对齐** `MetricsSnapshotService.frame()`（2026-10-17 按真实抓帧
  *    `_work/3a4/metrics-real-sample.txt` 补齐）：本文件原先只有 `count/qps/p99Ms/errorRate/
  *    clientErrorRate/hitRate` 这几格，指标页 3a.4 的五图一栏需要 `errors4xx/errors5xx`、
- *    `meanMs`、`cache.hit/miss/l2Degraded`、锁的 `acquires/acquired/timeouts/degraded/errors/
- *    waitMeanMs` —— 缺一格图上就少一条线。**这里只补形状，不把演示值说成真值**：
+ *    `meanMs`、`cache.hit/miss/l2Degraded`、锁的 `acquires/acquired/timeouts/waited/degraded/
+ *    errors/waitMeanMs` —— 缺一格图上就少一条线。**这里只补形状，不把演示值说成真值**：
  *    `health.reasons` 里那句「模拟日常」仍在，页面照旧显示「模拟日常」。
  *
  * ⚠️ 本场活动额度放完后 `n = 0`：与真流空闲时同形 —— `qps=0`、`hitRate=null`、
@@ -660,15 +660,19 @@ function metricsFrame(w, nowMs, n) {
       const timeouts = rnd() < 0.1 ? intBetween(rnd, 1, 3) : 0
       const degraded = rnd() < 0.02 ? 1 : 0
       const errors = rnd() < 0.01 ? 1 : 0
+      const waitMeanMs = Math.round((0.4 + rnd() * 6.5) * 10) / 10
       lockTimeouts += timeouts
       locks.push({
         lock,
         acquires,
         acquired: Math.max(0, acquires - timeouts - degraded - errors),
         timeouts,
+        // 「等待次数」= 取锁耗时 ≥5ms 的次数（真流口径见 MallLockMetrics.CONTENDED_NANOS）：
+        // 均值 ≥5ms 时大部分取锁都在排队；均值只有亚毫秒时只算零星抖动。
+        waited: Math.round(acquires * (waitMeanMs >= 5 ? 0.5 + rnd() * 0.35 : 0.05 + rnd() * 0.1)),
         degraded,
         errors,
-        waitMeanMs: Math.round((0.4 + rnd() * 6.5) * 10) / 10,
+        waitMeanMs,
       })
     }
   }
