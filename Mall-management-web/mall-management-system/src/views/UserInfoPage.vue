@@ -38,6 +38,7 @@
           <span v-if="userInfo.merchantid">商家号 <b>{{ userInfo.merchantid }}</b></span>
           <span>性别 <b>{{ userInfo.gender || '未填写' }}</b></span>
           <span>年龄 <b>{{ userInfo.age === null || userInfo.age === undefined || userInfo.age === '' ? '—' : userInfo.age }}</b></span>
+          <span>手机 <b>{{ userInfo.phone || '未填写' }}</b></span><!-- 2026-10-31：`/user/me` 起答掩码（138****1111），这里显示的就是掩码值 -->
           <span>邮箱 <b>{{ userInfo.email || '未填写' }}</b></span>
           <span>地址 <b>{{ userInfo.address || '未填写' }}</b></span>
           <span>简介 <b>{{ userInfo.selfintroduction || '未填写' }}</b></span>

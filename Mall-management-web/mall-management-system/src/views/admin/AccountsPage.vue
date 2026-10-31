@@ -215,6 +215,13 @@
 
         <!-- 读侧掩码 + 按次明文（D3 手验裁决）：列表只给 `a***@x.com`，点按钮才拉单行详情；
              每次成功读取后端写一条 `user.viewplaintext` 审计，故这里**不做本地长期缓存**。 -->
+        <!-- 2026-10-31〈上线前扫雷〉：手机号列（`user.phone`，Migration ㉛）。列表口径同邮箱 ——
+             只给掩码 `138****1111`；这里**没有**「查看明文」按钮：后端只为邮箱开了按次明文 + 审计，
+             手机号没这条通道，别在这页给一个按不动的按钮。 -->
+        <p class="a-contact">
+          <span class="a-contact-k">手机</span>
+          <span class="a-contact-v">{{ u.phone || '—' }}</span>
+        </p>
         <p class="a-contact">
           <span class="a-contact-k">邮箱</span>
           <span class="a-contact-v" :class="{ 'is-plain': plainEmail[u.username] }">

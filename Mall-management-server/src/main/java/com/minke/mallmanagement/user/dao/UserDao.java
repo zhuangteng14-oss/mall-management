@@ -110,6 +110,21 @@ public class UserDao {
     }
 
     /**
+     * 手机号 → 登录名 + 角色（2026-10-31「手机号登录」）。{@code user.phone} 是本次
+     * Migration ㉛ 新加的列；0 行抛 {@code EmptyResultDataAccessException}（调用方 catch 成「查不到」）。
+     *
+     * <p>⚠️ 必须 JOIN {@code login}：手机号落在 {@code user} 表（人），角色只在 {@code login}（凭据表）。
+     * 同一手机号可能出现多行（历史数据没有唯一约束时）⇒ {@code singleRow()} 抛
+     * {@code IncorrectResultSizeDataAccessException}，与「查不到」同归为登录失败 —— 不猜。
+     */
+    public Map<String, Object> selectLoginByPhone(String phone) {
+        String sql = "SELECT u.username AS username, l.Role AS Role "
+                + "FROM mall_management_sql.user u JOIN mall_management_sql.login l ON l.UserName = u.username "
+                + "WHERE u.phone = ?";
+        return jdbcClient.sql(sql).param(phone).query().singleRow();
+    }
+
+    /**
      * 用户名是否已存在（注册查重）。
      *
      * <p>⚠️ <b>这是 §5 #5 的 TOCTOU 竞态点</b>：查重与 INSERT 分属两条语句、无唯一约束兜底，

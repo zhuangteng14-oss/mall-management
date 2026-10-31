@@ -3,7 +3,7 @@ import App from './App.vue'; import './assets/fonts/noto.css'; import './assets/
 import router from './router/index.js'
 import { http, setUnauthorizedHandler, resetUnauthorizedLatch, UnauthorizedError } from './api/http'
 import { endpoints } from './api/endpoints'
-import { isLoggedIn, restoreFromSession, adoptSharedToken, getToken, setToken, publishSharedToken, clearToken } from './api/auth'
+import { isLoggedIn, restoreFromSession, adoptSharedToken, getToken, setToken, publishSharedToken, getSharedToken, isAdminSession, clearToken } from './api/auth'
 
 // ── 会话恢复（会话恢复笔，2026-10-05）───────────────────────────────────────────
 // 价值面（**只有后者两档是本笔新增的**）：
@@ -24,7 +24,7 @@ import { isLoggedIn, restoreFromSession, adoptSharedToken, getToken, setToken, p
 //    ⇒ 本函数直接返回、不做探针 ⇒ 要等某个业务请求 401 才会发现。这是**既有**行为，不在本笔。
 async function restoreIdentity() {
   try {
-    if (isLoggedIn()) return null; adoptSharedToken() // 本页已有身份 ⇒ 一次网络都不打；否则先**认领** localStorage 指针（同行压缩是为保住 `:28`/`:49` 的行号）
+    if (isLoggedIn()) { if (!isAdminSession()) await mintFreshForThisTab(); return null } adoptSharedToken() // 本页已有身份 ⇒ **先给自己换一张独立票**（新标签的 sessionStorage 是复制来的，票与原页相同 ⇒ 本页退出会销掉原页的票；见 `mintFreshForThisTab`）；否则先**认领** localStorage 指针（同行压缩是为保住 `:28`/`:49` 的行号）
     const res = await http.post(endpoints.user.me, null, { allowUnauthorized: true, timeout: 3000 })
     const data = await res.json()
     if (data && data.success) { restoreFromSession(data); return data } // ⚠️ 交回 body：调用方要判 role=3 与「要不要补票」
@@ -77,8 +77,8 @@ bootstrap()
 // ⚠️ 全程 fail-open：铸票失败**不阻断**启动（没票 = 退回 cookie 身份，与改前同形）。
 async function settleRecoveredIdentity(recovered) {
   if (!recovered || !recovered.success) return false
-  if (!getToken() && recovered.role === 3) return true
-  if (!getToken()) await mintForThisTab(recovered.role)
+  if (recovered.role === 3) return !getToken()
+  await mintForThisTab(recovered.role)   // 认领来的票也是**共享的**（= 指针）⇒ 本页必须再铸一张自己的，见 `mintFreshForThisTab`
   return false
 }
 
@@ -96,4 +96,33 @@ async function mintForThisTab(role) {
       if (role !== 3) publishSharedToken(data.token)
     }
   } catch (e) { /* fail-open：没票就退回 cookie 身份，等同改前 */ }
+}
+
+/**
+ * 每个标签页启动时给自己铸一张**独立**的票（多标签隔离补丁，2026-10-31）。
+ *
+ * 病：新标签页手里的票是**复制/认领**来的，和原标签页是同一张
+ *    （`window.open` 复制 sessionStorage；Ctrl+T 走 `adoptSharedToken` 认领指针）。
+ *    在该页点退出 ⇒ `POST /user/logout` 把这张共享票 revoke 掉 ⇒ 原标签页下一发 401、
+ *    掉成「未知账户」。⚠️ 实测（`scripts/probes/multitab-token-repro.mjs`）：B 退出后
+ *    A 用原票打 `/user/me` = 401；B 先铸自己的票再退出，A 仍 200。
+ * 治：只要本页已有身份，就用现有凭据换一张新票；旧票**不 revoke**，留在服务端自然过期
+ *    ⇒ 别的标签页手里的旧票不受影响。
+ *
+ * ⚠️ **指针维护**：旧票若正是 `localStorage` 指针 ⇒ 把指针改指新票。否则指针会一直指着
+ *    一张「本页退出时不会去销」的旧票，D6 的「登出清指针」失效，新标签页还能捡回已登出的身份。
+ *    旧票不是指针（别的账号的「最近登录」）⇒ **不碰指针**，否则一次普通刷新就篡改最近登录。
+ * ⚠️ **fail-open**：铸票失败保留原票，行为退回改前（隔离变弱，但不会把人踢下线）。
+ */
+async function mintFreshForThisTab() {
+  const prev = getToken()
+  const wasPointer = !!prev && prev === getSharedToken()
+  try {
+    const res = await http.post(endpoints.user.token, null, { allowUnauthorized: true, timeout: 3000 })
+    const data = await res.json()
+    if (data && data.token) {
+      setToken(data.token)
+      if (wasPointer || !prev) publishSharedToken(data.token)
+    }
+  } catch (e) { /* fail-open：保留原票 */ }
 }

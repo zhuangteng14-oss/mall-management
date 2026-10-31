@@ -1,5 +1,7 @@
 package com.minke.mallmanagement.user.service;
 
+import com.minke.mallmanagement.shared.text.DataMasking;
+import com.minke.mallmanagement.shared.text.MaskedInput;
 import com.minke.mallmanagement.shared.upload.UploadStorage;
 import com.minke.mallmanagement.shared.web.UserStateLookup;
 import com.minke.mallmanagement.user.dao.UserDao;
@@ -86,6 +88,24 @@ public class UserService {
      */
     public static final int LOGIN_BANNED = 4;
 
+    /**
+     * 手机号登录的**演示短信验证码**（2026-10-31「上线前扫雷」）。
+     *
+     * <p>⚠️ 本地演示没有短信通道，用户裁决「输入手机号 + 获取假验证码 123456 登录」。
+     * 本常量**只比对这一个固定值**，不签发、不存储、不按手机号区分 ——
+     * 它把「手机号登录」从占位接到真接口（真查库、真写会话、真铸票），
+     * 但**不是**一条生产可用的短信认证链（真通道 + 一次性码 + 频控属于另一笔）。
+     * 生产环境应把 {@code app.auth.phone.demo-sms-code} 置空以关闭本路径。
+     */
+    public static final String DEMO_SMS_CODE = "123456";
+
+    /** 手机号登录的判定结果：{@code username} 只在成功（role=1/2）时有值。 */
+    public record PhoneLoginResult(String username, int role) {
+        static PhoneLoginResult fail() {
+            return new PhoneLoginResult(null, 0);
+        }
+    }
+
     private final UserDao userDao;
     private final UserCacheService userCacheService;
     private final UserGovernanceDao userGovernanceDao;
@@ -148,6 +168,49 @@ public class UserService {
         } catch (Exception e) {
             // 用户不存在或查询异常 → 返回 0
             return 0;
+        }
+    }
+
+    /**
+     * 手机号登录（2026-10-31「上线前扫雷」）—— 与 {@link #loginSelect} 同一套出口语义。
+     *
+     * <p>四道闸，顺序与 {@link #loginSelect} 一致（**短信码在查库之前**，否则给出一条
+     * 「拿手机号试库里有没有」的探测通道）：
+     * <ol>
+     *   <li>手机号必须是 11 位数字、短信码等于 {@link #DEMO_SMS_CODE}，否则 {@code role=0}；</li>
+     *   <li>{@code user.phone} 查不到（或同一手机号对应多行）⇒ {@code role=0}；</li>
+     *   <li>只放行客户（1）/ 商家（2）—— 管理员走口令端点（{@code /user/adminToken}），
+     *       不在这里开一条绕过弱口令闸的路；</li>
+     *   <li>封禁 ⇒ {@link #LOGIN_BANNED}，判据与 {@link #loginSelect} 同源（{@code isBanned}）。</li>
+     * </ol>
+     *
+     * <p>⚠️ 与 {@code loginSelect} 一样**只在成功时**由 Controller 写会话 + 由前端铸票；
+     * 本方法自身不碰会话、不碰 token。
+     */
+    public PhoneLoginResult loginByPhone(String phone, String smsCode) {
+        if (phone == null || !phone.trim().matches("\\d{11}")) {
+            return PhoneLoginResult.fail();
+        }
+        if (smsCode == null || !DEMO_SMS_CODE.equals(smsCode.trim())) {
+            return PhoneLoginResult.fail();
+        }
+        try {
+            Map<String, Object> row = userDao.selectLoginByPhone(phone.trim());
+            if (row == null || row.get("Role") == null || row.get("username") == null) {
+                return PhoneLoginResult.fail();
+            }
+            int role = ((Number) row.get("Role")).intValue();
+            if (role != 1 && role != 2) {
+                return PhoneLoginResult.fail();
+            }
+            String username = row.get("username").toString();
+            if (isBanned(username)) {
+                return new PhoneLoginResult(null, LOGIN_BANNED);
+            }
+            return new PhoneLoginResult(username, role);
+        } catch (Exception e) {
+            // 查不到 / 多行 / 库不可用 —— 对调用方都是「这次登录不成立」，与 loginSelect 的 →0 同形
+            return PhoneLoginResult.fail();
         }
     }
 
@@ -477,8 +540,38 @@ public class UserService {
                                               String address, String selfintroduction) {
         Map<String, Object> result = new HashMap<>();
 
+        // 2026-10-31「上线前扫雷」：/user/me 与 /user/getUserInfo 起答**掩码**，
+        // 而资料页的编辑框直接绑在这份响应上 ⇒ 用户只改地址、原样提交时会把
+        // 「a***@qq.com」写进库。这里的判据是「回显」：入参恰等于**当前值的掩码**
+        // ⇒ 视为「这一格没改」，用真值替换；其余带 `*` 的入参仍是非法值（同
+        // MaskedInput 的写侧拦截，只是多了这一条合法回显的例外）。
+        Map<String, Object> current;
         try {
-            userDao.updateUserProfile(email, address, selfintroduction, username);
+            current = userDao.selectUserByUsername(username);
+        } catch (Exception e) {
+            current = null;   // 行不存在：没有可比对的真值 ⇒ 任何带 `*` 的值都按非法处理
+        }
+        String emailValue = email;
+        if (email != null && email.indexOf('*') >= 0) {
+            Object raw = (current == null) ? null : current.get("email");
+            if (raw instanceof String s && email.equals(DataMasking.maskEmail(s))) {
+                emailValue = s;
+            } else {
+                return rejected(result, "邮箱");
+            }
+        }
+        String addressValue = address;
+        if (address != null && address.indexOf('*') >= 0) {
+            Object raw = (current == null) ? null : current.get("address");
+            if (raw instanceof String s && address.equals(DataMasking.maskAddress(s))) {
+                addressValue = s;
+            } else {
+                return rejected(result, "地址");
+            }
+        }
+
+        try {
+            userDao.updateUserProfile(emailValue, addressValue, selfintroduction, username);
             result.put("success", true);
             result.put("msg", "个人信息保存成功");
         } catch (Exception e) {
@@ -487,6 +580,13 @@ public class UserService {
             result.put("msg", "保存失败，请检查数据");
         }
 
+        return result;
+    }
+
+    /** 掩码值不是本行当前值的回显 ⇒ 明确拒绝，别把 `*` 写进库（复用 {@link MaskedInput} 的文案）。 */
+    private static Map<String, Object> rejected(Map<String, Object> result, String field) {
+        result.put("success", false);
+        result.put("msg", MaskedInput.rejectMessage(field));
         return result;
     }
 

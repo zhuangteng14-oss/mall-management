@@ -2888,3 +2888,40 @@ CREATE TABLE IF NOT EXISTS `user_favorite` (
   UNIQUE KEY `uk_user_favorite_user_goods` (`UserId`, `GoodsId`),
   KEY `idx_user_favorite_user` (`UserId`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='商品收藏（2026-10-19 终局清道夫第 7 条）';
+-- ============================================================
+-- Migration ㉛：手机号字段  Date: 2026-10-31
+-- 依据：用户令〈上线前扫雷〉第 ② 条「补齐手机号字段与管理端密码重置」
+--       —— 登录页「手机号登录」Tab 是死占位；实测 `user` / `login` 两表都**没有**手机号列。
+-- 内容：① `user` 表加一列 `phone varchar(20) NULL`（加性、幂等守卫）；
+--       ② 5 个演示账号回填手机号（只在当前为空时写，复跑不改人工改过的值）；
+--       ③ 2 个演示账号补齐邮箱 / 地址 —— 第 ③ 条要求「F12 看 /user/me，手机号与邮箱全是星号」，
+--          演示账号 1111 / 2222 原先这两列是 NULL（掩码对 NULL 原样返回），演示时看不到星号。
+-- 口径：手机号落在 `user`（人），角色仍在 `login`（凭据表）—— 手机号登录时 JOIN 两表。
+--       演示短信码 `123456` 由 `UserService.DEMO_SMS_CODE` 给出，**不落库、不发放**。
+-- ⚠️ 管理员口令重置**刻意不写在本段**：明文口令不能进仓（push 侧有 [Credential Leakage] 钩子）。
+--    本地重置走 `_work/ResetAdminPwd.java`（口令从环境变量/本地文件读），
+--    登记见 `docs/agent/db-migration.md` 注意 28。
+-- 幂等：列用 `information_schema.COLUMNS` 守卫 + PREPARE；回填只更新 NULL / 空串。
+-- 回滚：加列按注意 1 = **逻辑废弃**（保留列 + 停用读取）；`DROP COLUMN phone` 只在本地开发库重导时用，
+--       执行前须人工确认（回填的 5 个手机号会一并丢失，但它们是演示数据、可重跑本段恢复）。
+-- ============================================================
+-- ---- ㉛-1 user.phone ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `user` ADD COLUMN `phone` varchar(20) DEFAULT NULL COMMENT ''手机号（2026-10-31 手机号登录；演示账号已回填）'' AFTER `email`',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user' AND COLUMN_NAME = 'phone');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+-- ---- ㉛-2 演示账号手机号回填（只填空值 ⇒ 复跑幂等）----
+UPDATE `user` SET `phone` = '13800001111' WHERE `username` = '1111' AND (`phone` IS NULL OR `phone` = '');
+UPDATE `user` SET `phone` = '13900002222' WHERE `username` = '2222' AND (`phone` IS NULL OR `phone` = '');
+UPDATE `user` SET `phone` = '13700000000' WHERE `username` = 'admin' AND (`phone` IS NULL OR `phone` = '');
+UPDATE `user` SET `phone` = '13600001111' WHERE `username` = 'chenguang_parts' AND (`phone` IS NULL OR `phone` = '');
+UPDATE `user` SET `phone` = '13500002222' WHERE `username` = 'yunqi_digital' AND (`phone` IS NULL OR `phone` = '');
+-- ---- ㉛-3 演示账号邮箱 / 地址回填（同样只填空值）----
+-- ⚠️ 只为「掩码要被看见」：`DataMasking` 对 NULL / 空串原样返回（库里本来没有值，
+--    掩码不该把它变成 `***`）⇒ 演示账号没这两列时，/user/me 里看到的是 null 而不是星号。
+UPDATE `user` SET `email` = 'demo1111@example.com' WHERE `username` = '1111' AND (`email` IS NULL OR `email` = '');
+UPDATE `user` SET `address` = '北京市朝阳区建国路 1 号' WHERE `username` = '1111' AND (`address` IS NULL OR `address` = '');
+UPDATE `user` SET `email` = 'demo2222@example.com' WHERE `username` = '2222' AND (`email` IS NULL OR `email` = '');
+UPDATE `user` SET `address` = '上海市浦东新区世纪大道 2 号' WHERE `username` = '2222' AND (`address` IS NULL OR `address` = '');

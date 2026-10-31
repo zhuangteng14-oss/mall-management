@@ -722,6 +722,22 @@ public abstract class AbstractSmokeTest {
     protected org.springframework.transaction.PlatformTransactionManager platformTransactionManager;
 
     /**
+     * 图形验证码替身（2026-10-31「上线前扫雷」）。
+     *
+     * <p><b>为什么必须有</b>：{@code CaptchaController} 是 {@code @RestController}，
+     * {@code @WebMvcTest} 自动扫入 ⇒ 它吃的 {@code CaptchaService} 在切片里没有着落，
+     * 不补就是**整片上下文起不来**（同上面历次「新 @Service 不进清单」那种地雷）。
+     * 而 {@code CaptchaService} 自己吃 {@code StringRedisTemplate}（切片无 Redis）⇒ 只能给替身。
+     *
+     * <p>⚠️ 替身的 {@code verifyAndConsume} 默认回 {@code false}。切片之所以不受影响，
+     * 是因为 {@code application-smoke.properties} 把 {@code app.auth.captcha.enabled} 钉成
+     * false ⇒ {@code UserController.loginSelect} 根本不调它。**别**把那个开关改回 true
+     * 而不 stub —— 那样 LoginSelectSmokeTest 会从 "2" 变成 "-1"。
+     */
+    @MockitoBean
+    protected com.minke.mallmanagement.user.service.CaptchaService captchaService;
+
+    /**
      * 锁替身的行为：**直接执行 action**（不做任何互斥、不碰 Redis）。
      *
      * <p>为什么不逐用例 stub：smoke 测的是 Controller 的分支与响应文案，锁是**穿过它的一层**；

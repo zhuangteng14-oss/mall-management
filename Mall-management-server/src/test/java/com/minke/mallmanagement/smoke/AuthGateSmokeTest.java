@@ -168,16 +168,19 @@ class AuthGateSwitchOnTest extends AbstractSmokeTest {
     }
 
     /**
-     * 白名单全表扫描：15 条逐条直调 {@code preHandle}，**无会话**也必须放行。
+     * 白名单全表扫描：17 条逐条直调 {@code preHandle}，**无会话**也必须放行。
      *
-     * <p>三条断言各堵一个口子：① 条数 == 15（防有人删条却不改注释）；② 逐条放行；
+     * <p>三条断言各堵一个口子：① 条数 == 17（防有人删条却不改注释）；② 逐条放行；
      * ③ <b>反断言</b> —— 表外路径必须被拦（否则「全都放行」也能让 ② 全绿）。
+     *
+     * <p>⚠️ 15 → 17（2026-10-31「上线前扫雷」）：登录链补 {@code /user/captcha} 与
+     * {@code /user/loginByPhone} 两条（图形验证码 / 手机号登录都在未登录状态下打）。
      */
     @Test
     void whitelist_allEntries_passTheGate() throws Exception {
         assertThat(WebAuthConfig.AUTH_WHITELIST)
-                .as("白名单条数 = 业务 11 + 基础设施 4。改这个数必须同时改 WebAuthConfig 的注释")
-                .hasSize(15);
+                .as("白名单条数 = 业务 13 + 基础设施 4。改这个数必须同时改 WebAuthConfig 的注释")
+                .hasSize(17);
 
         // ⚠️ 多账户隔离笔（2026-10-06）：构造参数由 2 个变 3 个（第 ④ 档 identityPaths）。
         //    传真表而不是 List.of() —— 反断言那半段（REACHABLE_BUT_NOT_PUBLIC 必须被拦）正是靠

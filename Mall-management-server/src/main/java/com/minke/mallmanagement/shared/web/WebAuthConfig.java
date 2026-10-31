@@ -110,6 +110,9 @@ public class WebAuthConfig implements WebMvcConfigurer {
             "/user/loginSelect", "/user/adminToken",
             "/user/loginAdd",
             "/user/getUserInfo",
+            // 2026-10-31「上线前扫雷」：图形验证码（登录页一进来就取）与手机号登录（同一张登录页的
+            // 另一个 Tab）。两者都在未登录状态下打 ⇒ 同属「登录链」。
+            "/user/captcha", "/user/loginByPhone",
             // ===== 业务：登录前后台页面（首页 / 商品页 / 搜索页 / 店铺主页）=====
             "/goods/goodstype",
             "/goods/goodsSelectHome",

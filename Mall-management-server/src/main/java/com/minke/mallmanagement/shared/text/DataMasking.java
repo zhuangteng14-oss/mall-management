@@ -115,13 +115,34 @@ public final class DataMasking {
 
     // ==================== 行（复制后改，不动入参） ====================
 
-    /** 用户治理列表的一行：只掩 {@code email}。其余列（含封禁状态、降级列）原样保留。 */
+    /** 用户治理列表的一行：掩 {@code email} 与 {@code phone}。其余列（含封禁状态、降级列）原样保留。 */
     public static Map<String, Object> maskUserRow(Map<String, Object> row) {
         if (row == null) {
             return null;
         }
         Map<String, Object> copy = new LinkedHashMap<>(row);
         maskIfString(copy, "email", DataMasking::maskEmail);
+        maskIfString(copy, "phone", DataMasking::maskPhone);
+        return copy;
+    }
+
+    /**
+     * 「我是谁」/ 凭据取资料（{@code /user/me}、{@code /user/getUserInfo}）的一行：
+     * 掩 {@code email} / {@code phone} / {@code address}。
+     *
+     * <p>⚠️ 两个端点必须用**同一把掩码**：{@code AuthSessionSmokeTest} 钉着「{@code /user/me}
+     * 摘掉 success/role 后逐键等于 {@code /user/getUserInfo}」——只掩一处那条断言会当场红。
+     * <p>⚠️ {@code customerid} / {@code merchantid} **不掩**：它们是前端调业务接口的身份键，
+     * 掩掉会让整页静默失效（不是展示字段）。掩码只针对「看一眼就能拿去联系 / 定位本人」的列。
+     */
+    public static Map<String, Object> maskProfileRow(Map<String, Object> row) {
+        if (row == null) {
+            return null;
+        }
+        Map<String, Object> copy = new LinkedHashMap<>(row);
+        maskIfString(copy, "email", DataMasking::maskEmail);
+        maskIfString(copy, "phone", DataMasking::maskPhone);
+        maskIfString(copy, "address", DataMasking::maskAddress);
         return copy;
     }
 

@@ -82,15 +82,15 @@
               </div>
             </div>
 
-            <!-- ① 图形验证码（占位 · N=3）。整块是 `<div class="f">` ⇒ **块级**，
-                 按口径只挂 `data-slot` + `title`，**不挂 `disabled`**；块内两枚真控件照稿 `disabled`。 -->
-            <div class="f" data-slot="预留 · 图形验证码（动现有代码 3 处）"
-                 title="待 C3〈鉴权〉——无验证码端点、无图形生成服务：endpoints.js + AuthController.java + LoginPage.vue = 3 处">
+            <!-- ① 图形验证码 —— 2026-10-31〈上线前扫雷〉接通真实端点：
+                 图片是后端 `GET /user/captcha` 现画的 PNG（data URL），验证码明文只在服务端；
+                 登录时把 `captchaId + captchaCode` 一起提交，**错一次即失效**（点「换一张」重取）。 -->
+            <div class="f">
               <label for="cap">验证码</label>
               <div class="caprow">
-                <div class="ipt"><input id="cap" type="text" placeholder="填入右侧字符" disabled></div>
-                <span class="capfig" aria-hidden="true">7K39</span>
-                <button class="again" type="button" disabled>换一张</button>
+                <div class="ipt"><input id="cap" type="text" placeholder="填入右侧字符" maxlength="4" v-model="captchaCode"></div>
+                <img class="capfig" :src="captchaImg" alt="图形验证码" title="看不清？点图片换一张" @click="loadCaptcha" />
+                <button class="again" type="button" @click="loadCaptcha">换一张</button>
               </div>
             </div>
 
@@ -130,26 +130,25 @@
               <button type="button" :class="{ on: loginView === 'phone' }" @click="loginView = 'phone'">手机号登录</button>
             </div>
 
-            <div data-slot="预留 · 手机号登录（动现有代码 4 处 · 超档）"
-                 title="待 C3〈鉴权〉——无「手机号 + 短信验证码」端点，也没有短信通道：endpoints.js + AuthController.java + mall_management_sql.sql + LoginPage.vue = 4 处。⚠️ `login` 表实测只有 (UserName, Password, Role, Id)，**没有手机号列** ⇒ 超档，因清单点名而画出（见 README 挂账表）。">
+            <!-- 手机号登录 —— 2026-10-31〈上线前扫雷〉接通：user.phone（Migration ㉛ 回填了演示账号）
+                 + 后端固定演示码 123456。真短信通道 / 频控不在本笔范围。 -->
+            <div>
               <div class="f">
                 <label for="ph">手机号</label>
-                <div class="ipt"><input id="ph" type="tel" placeholder="中国大陆 11 位手机号" disabled></div>
+                <div class="ipt"><input id="ph" type="tel" placeholder="中国大陆 11 位手机号" maxlength="11" v-model="phone"></div>
               </div>
 
               <div class="f">
                 <label for="sms">短信验证码</label>
                 <div class="caprow">
-                  <div class="ipt"><input id="sms" type="text" placeholder="6 位数字" disabled></div>
-                  <button class="btn btn-ghost btn-sm" type="button" disabled>获取验证码</button>
+                  <div class="ipt"><input id="sms" type="text" placeholder="6 位数字" maxlength="6" v-model="smsCode"></div>
+                  <button class="btn btn-ghost btn-sm" type="button" @click="sendSms">获取验证码</button>
                 </div>
+                <div class="err">{{ smsTip }}</div>
               </div>
 
-              <div class="row">
-                <label class="chk"><input type="checkbox" disabled> 记住我</label>
-              </div>
-
-              <button class="btn btn-primary btn-block" type="button" disabled>登录</button>
+              <div class="warn">{{ loginWarnText }}</div>
+              <button class="btn btn-primary btn-block" type="button" @click="phoneLogin">登录</button>
             </div>
 
             <div class="swap">
@@ -268,6 +267,15 @@ export default {
       loginAccount: "",
       loginPwd: "",
       loginWarnText: "",
+      // ── 2026-10-31〈上线前扫雷〉：图形验证码 + 手机号登录 ──────────────────────
+      // captchaId 是后端挑战号（验证码明文只在服务端 / Redis）；captchaImg 是 data URL。
+      // 每次登录（成功或失败）都会换一张：后端是「先删后比」的一次性语义。
+      captchaId: "",
+      captchaImg: "",
+      captchaCode: "",
+      phone: "",
+      smsCode: "",
+      smsTip: "",
       username: "",
       userType: "",
       birthDate: "",
@@ -279,7 +287,28 @@ export default {
       err: { username: "", userType: "", birthDate: "", pwd: "", gender: "" },
     };
   },
+  // 进页就取一张验证码。⚠️ 取失败不阻断页面（warn 提示「刷新重试」），
+  //   但后端 captcha 闸是开的 ⇒ 没取到码一定登不上，这是有意的失败方向。
+  mounted() {
+    this.loadCaptcha();
+  },
   methods: {
+    // ── 2026-10-31〈上线前扫雷〉：图形验证码 ────────────────────────────────────
+    async loadCaptcha() {
+      try {
+        const res = await http.get(endpoints.auth.captcha);
+        const data = await res.json();
+        if (data && data.success && data.image) {
+          this.captchaId = data.captchaId;
+          this.captchaImg = data.image;
+          this.captchaCode = "";
+        } else {
+          this.loginWarnText = "验证码加载失败，请点「换一张」重试";
+        }
+      } catch (e) {
+        this.loginWarnText = "验证码加载失败：请确认后端已在 8088 运行";
+      }
+    },
     toggle() {
       this.isSlide = !this.isSlide;
       this.loginWarnText = "";
@@ -292,12 +321,17 @@ export default {
         this.loginWarnText = "请输入账号和密码";
         return;
       }
+      // 2026-10-31〈上线前扫雷〉：图形验证码是登录链的一环。空码本地就挡掉，
+      //   不去换后端那个「一发即作废」的挑战（白跑一次 = 页面上这张图当场废掉）。
+      if (!this.captchaCode) { this.loginWarnText = "请输入图中的验证码"; return; }
       try {
         const res = await http.post(endpoints.user.loginSelect, new URLSearchParams({
             username: this.loginAccount,
-            password: this.loginPwd
+            password: this.loginPwd,
+            captchaId: this.captchaId,
+            captchaCode: this.captchaCode
           }));
-        const role = await res.text(); if (role.trim() === "4") { this.loginWarnText = "账号已被封禁，请联系管理员解封"; return; }   // ⚠️ C3 块 2 用户块**手验后补丁**（2026-10-09，用户第 2 条）：封禁用户登录必须说「已封禁」，而不是落成「未识别到账户」。⚠️ **必须写在 `:306` 的 `/user/me` 之前**：封禁用户后端**不写会话** ⇒ 那一发必 401、先抛，异常被 `:328` 的通用文案接走；写在下面那条 `if/else` 链（`:317` 起）里是**死代码** —— `role === "0"` 那支今天就是这么死的（它同样在 `:306` 之后）。⚠️ 用 `role.trim()` 比对：`res.text()` 是**原始**响应体（A3 的断言也是 `body.trim()`）。同行追加，保净零行数（本文件被 `c3-block-2-user.md` 按 `:283-287` / `:289-330` 引）。
+        const role = await res.text(); if (role.trim() === "4") { this.loginWarnText = "账号已被封禁，请联系管理员解封"; this.loadCaptcha(); return; } if (role.trim() === "-1") { this.loginWarnText = "验证码错误或已过期，已换一张，请重新输入"; this.loadCaptcha(); return; }   // ⚠️ `-1` = `UserController.LOGIN_CAPTCHA_REJECTED`：验证码错/过期（后端一次性、先删后比）⇒ **必须换一张**再试。⚠️ 与 `"4"` 同位置早退：两者都排在 `/user/me` **之前**（那一发在 role=0/-1 时必 401，先抛就轮不到这里的话术）。⚠️ C3 块 2 用户块**手验后补丁**（2026-10-09，用户第 2 条）：封禁用户登录必须说「已封禁」，而不是落成「未识别到账户」。⚠️ **必须写在 `:340` 的 `/user/me` 之前**：封禁用户后端**不写会话** ⇒ 那一发必 401、先抛，异常被 `:362` 的通用文案接走；写在下面那条 `if/else` 链（`:351` 起）里是**死代码** —— `role === "0"` 那支今天就是这么死的（它同样在 `:340` 之后）。⚠️ 用 `role.trim()` 比对：`res.text()` 是**原始**响应体（A3 的断言也是 `body.trim()`）。同行追加，保净零行数（本文件被 `c3-block-2-user.md` 按 `:283-287` / `:289-330` 引）。
 
         // 登录成功后立即获取用户信息，保存商家ID / 客户ID
         // P2.6（2026-10-05）：改走**会话驱动**的 /user/me —— 凭据只在上一发 loginSelect 里出现，
@@ -314,8 +348,8 @@ export default {
         if (userData.customerid) { setCustomerId(userData.customerid); clearMerchantId(); }   // 客户：清上一位商家的 merchantid
         // ⚠️ 清**写在这两个「有值」分支内**：role=0 / `me` 401 那一发 body 里没有 id ⇒ 两个分支都不跑 ⇒ 不会误伤「已登录又登一次、密码打错」的旧身份。
 
-        if(role === "0"){   // ⚠️ **本支不可达**（2026-10-09 核实，非本笔引入）：它排在 `:306` 的 `/user/me` **之后**，而 `role === "0"` 时后端不写会话 ⇒ 那一发必 401、先抛 ⇒ 异常被 `:328` 的通用文案接走，永远轮不到这里。留着只为**不动行号**（本文件最大被引行是 `:687`）。封禁（`"4"`）那支已按同一理由提到 `:300` 去早退。
-          this.loginWarnText = "未找到该用户，请查看对应账号密码有无写错，或者前往右侧进行注册";
+        if(role === "0"){   // ⚠️ **本支不可达**（2026-10-09 核实，非本笔引入）：它排在 `:340` 的 `/user/me` **之后**，而 `role === "0"` 时后端不写会话 ⇒ 那一发必 401、先抛 ⇒ 异常被 `:362` 的通用文案接走，永远轮不到这里。留着只为**不动行号**（本文件最大被引行是 `:756`）。封禁（`"4"`）那支已按同一理由提到 `:334` 去早退。
+          this.loginWarnText = "未找到该用户，请查看对应账号密码有无写错，或者前往右侧进行注册"; this.loadCaptcha();
         }else if(role === "1"){
           setUsername(this.loginAccount); setRole(role); await this.mintToken(role); restoreFromSession(userData);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md#api-5` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）；批四第二批 commit 3：`restoreFromSession` 必须排在 `setUsername`/`setRole` **之后**（它们的 `dropRestored()` 会清掉提前贴的恢复态）⇒ 登录后立刻拿到 MemberLevel/Balance
           this.$router.push(this.landingAfterLogin(role));   // 前端路由守卫笔（2026-10-06）：落点改由 landingAfterLogin 决定（有合法 redirect 则回原目标，否则 = 原来的 "/customer"）
@@ -323,9 +357,43 @@ export default {
         else if(role === "2"){
           setUsername(this.loginAccount); setRole(role); await this.mintToken(role); restoreFromSession(userData);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md#api-5` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）；批四第二批 commit 3：同客户支，恢复态提供 MemberLevel/Balance/IsBrand
           this.$router.push(this.landingAfterLogin(role));   // 前端路由守卫笔（2026-10-06）：同上，否则 = 原来的 "/merchant"
-        }  else if(role === "3"){ setUsername(this.loginAccount); setRole(role); await this.mintToken(role); this.$router.push(this.landingAfterLogin(role)); restoreFromSession(userData); } // 批四第二批 commit 3：贴在 `setUsername`/`setRole` **之后**（它们的 `dropRestored()` 会清掉提前贴的恢复态）；`userData` 只含 role/username ⇒ 管理端不会带出会员字段，无害。 // ✅ C3（2026-10-08，管理员）：⚠️ **整个分支贴在 `}` 尾巴上写完** —— 本文件最大被引行是 `:687`（全仓 15 条引用里最高的一条），`if/else` 链里在 `:326` 之后**插一行**就会让其后 360 行集体 +1、那条引用当场失效 ⇒ 沿用本链上方 `:320`/`:324` 既有的「同行追加保净零」手法。⚠️ `mintToken` 那一发今天**注定 401**（`/user/token` 明文禁止 cookie 管理员换票，是刻意的安全属性，见 slot-registry §十三 13-5）⇒ 被 `mintToken` 内部的 fail-open catch 吞掉，**不影响落点**；管理员身份今天只由 cookie 会话承载，骨架够用
+        }  else if(role === "3"){ setUsername(this.loginAccount); setRole(role); await this.mintToken(role); this.$router.push(this.landingAfterLogin(role)); restoreFromSession(userData); } // 批四第二批 commit 3：贴在 `setUsername`/`setRole` **之后**（它们的 `dropRestored()` 会清掉提前贴的恢复态）；`userData` 只含 role/username ⇒ 管理端不会带出会员字段，无害。 // ✅ C3（2026-10-08，管理员）：⚠️ **整个分支贴在 `}` 尾巴上写完** —— 本文件最大被引行是 `:756`（全仓 15 条引用里最高的一条），`if/else` 链里在 `:360` 之后**插一行**就会让其后 360 行集体 +1、那条引用当场失效 ⇒ 沿用本链上方 `:354`/`:358` 既有的「同行追加保净零」手法。⚠️ `mintToken` 那一发今天**注定 401**（`/user/token` 明文禁止 cookie 管理员换票，是刻意的安全属性，见 slot-registry §十三 13-5）⇒ 被 `mintToken` 内部的 fail-open catch 吞掉，**不影响落点**；管理员身份今天只由 cookie 会话承载，骨架够用
       } catch (e) {
-        this.loginWarnText = (e instanceof TypeError || e.name === 'TimeoutError') ? "连不上服务器：请确认后端已在 8088 运行、且本页源在 CORS 白名单内" : "未识别到账户，请检查对应输入";   // ⚠️ 结构调整（2026-10-07）：连不上（fetch 抛 `TypeError`，含 CORS 被拦 / 超时）**不再**与「账号对不上」同报 —— 原句把环境问题说成用户输错（用户实测「登不上」所见即此句）。判据只放这两类：`UnauthorizedError`（role=0 ⇒ `/user/me` 401，见 :304）**必须仍走原句**，它是「账号对不上」的正规路径。同行追加，保持净零行数。
+        this.loginWarnText = (e instanceof TypeError || e.name === 'TimeoutError') ? "连不上服务器：请确认后端已在 8088 运行、且本页源在 CORS 白名单内" : "未识别到账户，请检查对应输入"; this.loadCaptcha();   // ⚠️ 最后一次提交已把本轮验证码消费掉（含「连不上」那种半路断掉的情形）⇒ 一律换一张，否则下一次输入必红。⚠️ 结构调整（2026-10-07）：连不上（fetch 抛 `TypeError`，含 CORS 被拦 / 超时）**不再**与「账号对不上」同报 —— 原句把环境问题说成用户输错（用户实测「登不上」所见即此句）。判据只放这两类：`UnauthorizedError`（role=0 ⇒ `/user/me` 401，见 :338）**必须仍走原句**，它是「账号对不上」的正规路径。同行追加，保持净零行数。
+      }
+    },
+
+    // ── 2026-10-31〈上线前扫雷〉：手机号登录（台账见 docs/agent/db-migration.md 第 28 条）──────
+    // 演示口径：短信通道没有，后端把演示码固定成 `UserService.DEMO_SMS_CODE = "123456"`。
+    //   本方法**不发请求**，只填提示 + 预填输入框 —— 不假装有一条真实下发链路。
+    sendSms() {
+      if (!/^\d{11}$/.test(this.phone)) { this.smsTip = "请输入 11 位手机号"; return; }
+      this.smsTip = "演示环境：短信验证码固定为 123456（已自动填入）";
+      this.smsCode = "123456";
+    },
+    // 与 login() 同形：loginByPhone 回的也是**裸 role 文本**（0 未成立 / 1 客户 / 2 商家 / 4 封禁），
+    //   成功后的三件事一字不差 —— 取 /user/me 拿业务号、互斥写 id、铸本标签页专属票。
+    async phoneLogin() {
+      this.loginWarnText = "";
+      if (!/^\d{11}$/.test(this.phone)) { this.loginWarnText = "请输入 11 位手机号"; return; }
+      if (!this.smsCode) { this.loginWarnText = "请先获取并填入短信验证码"; return; }
+      try {
+        const res = await http.post(endpoints.auth.loginByPhone, new URLSearchParams({
+            phone: this.phone,
+            smsCode: this.smsCode
+          }));
+        const role = (await res.text()).trim();
+        if (role === "4") { this.loginWarnText = "账号已被封禁，请联系管理员解封"; return; }
+        if (role !== "1" && role !== "2") { this.loginWarnText = "该手机号未注册，或短信验证码不正确"; return; }
+        const userRes = await http.post(endpoints.user.me, null, { allowUnauthorized: true });
+        const userData = await userRes.json();
+        // 业务号互斥写入 —— 与 login() 的 `:348` 同一条理由（两行的 id 互斥，只写不清会让上一位残留）。
+        if (userData.merchantid) { setMerchantId(userData.merchantid); clearCustomerId(); }
+        if (userData.customerid) { setCustomerId(userData.customerid); clearMerchantId(); }
+        setUsername(userData.username || ""); setRole(role); await this.mintToken(role); restoreFromSession(userData);
+        this.$router.push(this.landingAfterLogin(role));
+      } catch (e) {
+        this.loginWarnText = (e instanceof TypeError || e.name === 'TimeoutError') ? "连不上服务器：请确认后端已在 8088 运行、且本页源在 CORS 白名单内" : "手机号登录失败，请稍后重试";
       }
     },
 
@@ -431,7 +499,7 @@ export default {
     //   ⚠️ 代价：角色首页表（下面的 `/customer` / `/merchant`）与 `router/index.js` 的 `ROLE_HOME`
     //   是**同构的第二份**；改一处要回头核另一处。⚠️ **按语（角色边界，2026-10-06，§5-AG (16)）**：角色**判定**已改为与守卫**同源**的 `meta.roles`（下面新增的 `roleAllowed`）；但**这张首页表**仍与 `ROLE_HOME` 各一份（**未合并** —— R6 裁决 D10 把它挂给了待定笔，本笔不碰）。
     landingAfterLogin(role) {
-      const base = role === "3" ? "/admin" : role === "2" ? "/merchant" : "/customer";   // ✅ C3（2026-10-08）**已补**：原注「`role === "3"` 会落到 /customer —— 归 C3 一并补」当场兑现。⚠️ 本行是**同行改写**（不是插行）⇒ `:687` 及之前的所有被引行零漂移；`role === "1"` / `"2"` 的取值逐字未变
+      const base = role === "3" ? "/admin" : role === "2" ? "/merchant" : "/customer";   // ✅ C3（2026-10-08）**已补**：原注「`role === "3"` 会落到 /customer —— 归 C3 一并补」当场兑现。⚠️ 本行是**同行改写**（不是插行）⇒ `:756` 及之前的所有被引行零漂移；`role === "1"` / `"2"` 的取值逐字未变
       const target = this.$route.query.redirect;
       if (typeof target !== "string" || !target.startsWith("/") || target.startsWith("//")) return base;
       if (target === "/login") return base;
@@ -593,10 +661,11 @@ h1.t { font-family: var(--font-display); font-size: var(--d2); font-weight: var(
 /* 验证码行：输入框 + 图形 + 换一张 */
 .caprow { display: flex; gap: var(--s3); }
 .caprow .ipt { flex: 1 1 auto; }
+/* 2026-10-31：`.capfig` 从「占位文字」换成真 `<img>`（后端 PNG 的 data URL）⇒
+   `object-fit: contain` 保住 120×40 的原始比例，`cursor: pointer` 提示可点换一张。 */
 .capfig { flex: 0 0 96px; height: 46px; border: 1px solid var(--line-2); border-radius: var(--r2);
-          background: var(--surface-2); display: flex; align-items: center; justify-content: center;
-          font-family: var(--font-mono); font-size: var(--fs-md); letter-spacing: .22em;
-          color: var(--ink-3); user-select: none; }
+          background: var(--surface-2); object-fit: contain; cursor: pointer; user-select: none; }
+.capfig:hover { border-color: var(--brand); }
 .caprow .again { flex: 0 0 auto; height: 46px; padding: 0 var(--s3); font-size: var(--fs-xs); color: var(--ink-3); }
 .err { min-height: 16px; margin-top: var(--s1); font-size: var(--fs-xs); color: var(--danger); }
 

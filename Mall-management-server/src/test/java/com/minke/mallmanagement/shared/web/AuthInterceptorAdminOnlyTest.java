@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <h2>【为什么不走 HTTP 而直接调拦截器】</h2>
  * 默认 profile 下管理员**铸不出票**（{@code /user/token} 对 cookie 管理员答 401，是刻意的安全属性，
- * 见 {@code LoginPage.vue:326} 的注释与 slot-registry §十三 13-5）⇒ 真实链路上「管理员该放行」
+ * 见 {@code LoginPage.vue:360} 的注释与 slot-registry §十三 13-5）⇒ 真实链路上「管理员该放行」
  * 这一档今天没有 HTTP 入口可打。本类直接用 {@link AuthTokenStore#mint} 铸一张 role=3 的票，
  * 让**真实的** {@link AuthSession#authorize} + 拦截器判定跑一遍 —— 判据是真实代码，不是替身。
  */

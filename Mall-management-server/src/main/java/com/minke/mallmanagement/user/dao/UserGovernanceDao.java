@@ -60,7 +60,10 @@ public class UserGovernanceDao {
      * {@code GoodsCacheService} 同款处置）。
      */
     private static final String USER_COLUMNS =
-            "u.username, u.usertype, u.customerid, u.merchantid, u.gender, u.age, u.email, "
+            // 2026-10-31：加性列 `u.phone`（手机号）。由 Migration ㉛ 建的列；DataMasking.maskUserRow
+            // 会把它掩成 138****1234。⚠️ userRow（审计 before 快照）共用本列清单 —— 它**不掩码**
+            // （审计要能还原事实），见 DataMasking 类注释。
+            "u.username, u.usertype, u.customerid, u.merchantid, u.gender, u.age, u.email, u.phone, "
                     + "u.banned, u.banReason, "
                     + "DATE_FORMAT(u.bannedAt, '%Y-%m-%d %H:%i:%s') AS bannedAt, "
                     + "u.DowngradeState, u.DowngradeReason, u.MemberLevel, "   // 批四第二批 commit 3：管理端用户列表带 VIP 徽标（加性列）

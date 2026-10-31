@@ -7,9 +7,10 @@ import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.AuthTokenStore;
 import com.minke.mallmanagement.shared.web.IdentityGuard;
 import com.minke.mallmanagement.shared.web.Result;
-import com.minke.mallmanagement.shared.text.MaskedInput;
+import com.minke.mallmanagement.shared.text.DataMasking;
 import com.minke.mallmanagement.shared.web.UserStateLookup;
 import com.minke.mallmanagement.user.dao.UserGovernanceDao;
+import com.minke.mallmanagement.user.service.CaptchaService;
 import com.minke.mallmanagement.user.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -92,6 +93,16 @@ import java.util.Map;
 @RequestMapping("/user")
 public class UserController {
 
+    /**
+     * {@code loginSelect} 的「验证码不对」返回值（2026-10-31）。
+     *
+     * <p>⚠️ 用 {@code -1} 而不是 0：0 在前端是「账号密码不对」的正规路径，混用会让
+     * 「输错验证码」被提示成「账号不存在」。负数不在 {@code login.Role} 的取值域里，
+     * 且不是任何角色号 ⇒ 与 {@code UserService.LOGIN_BANNED = 4} 一样，是**扩展出来的出口**，
+     * 不是角色。
+     */
+    public static final int LOGIN_CAPTCHA_REJECTED = -1;
+
     private final UserService userService;
     private final AuditService auditService;
     /** 业务号 → 登录名 的反查，只给 {@code updateProfile} 那一行判据用（补丁 A1）。
@@ -102,13 +113,33 @@ public class UserController {
     /** 会员等级读写口（批四第二批 commit 3）—— 只被 {@code /user/member/open} 用。 */
     private final UserGovernanceDao userGovernanceDao;
 
+    /**
+     * 图形验证码（2026-10-31「上线前扫雷」）。
+     *
+     * <p>⚠️ 用 {@link ObjectProvider} 而不是裸依赖，与 {@link #userStateLookupProvider} 同一条
+     * 切片论证：{@code @WebMvcTest} 不扫 {@code @Service}，裸注入会让整片上下文起不来 ——
+     * 切片侧由 {@code AbstractSmokeTest} 的 {@code @MockitoBean CaptchaService} 喂上。
+     */
+    private final ObjectProvider<CaptchaService> captchaServiceProvider;
+
+    /**
+     * 验证码开关。默认 **true**（登录必须带验证码）；smoke / a3 两个 profile 显式 false
+     * —— 那两个 profile 的登录调用方（smoke 用例、A3 的 S1 压测）不带验证码。
+     * ⚠️ 用字段注入而非构造器参数：本类被多处文档按行号引用，且切片里 {@code @Value} 照样解析
+     * （{@code application-smoke.properties} 提供 false）。
+     */
+    @org.springframework.beans.factory.annotation.Value("${app.auth.captcha.enabled:true}")
+    private boolean captchaEnabled = true;
+
     public UserController(UserService userService, AuditService auditService,
                           ObjectProvider<UserStateLookup> userStateLookupProvider,
-                          UserGovernanceDao userGovernanceDao) {
+                          UserGovernanceDao userGovernanceDao,
+                          ObjectProvider<CaptchaService> captchaServiceProvider) {
         this.userService = userService;
         this.auditService = auditService;
         this.userStateLookupProvider = userStateLookupProvider;
         this.userGovernanceDao = userGovernanceDao;
+        this.captchaServiceProvider = captchaServiceProvider;
     }
 
     //这是一个接口（用于返回登录界面对应的数据，决定了此次登录去往哪个端【客户端or商家端】）
@@ -118,8 +149,15 @@ public class UserController {
     public int loginSelect(
             @RequestParam("username") String username,       // 对应数据库 login 表的 UserName
             @RequestParam("password") String password,       // 对应数据库 login 表的 PassWord
+            @RequestParam(value = "captchaId", required = false) String captchaId,       // 2026-10-31：图形验证码挑战号
+            @RequestParam(value = "captchaCode", required = false) String captchaCode,   // 2026-10-31：用户填的字符
             HttpServletRequest request                       // 鉴权笔 2：认证成功时在这里写会话
     ) {
+        // 2026-10-31「上线前扫雷」：验证码在**凭据校验之前**消费 —— 错一次即失效（CaptchaService
+        // 先删后比）。答 -1（既不是角色号也不是 0），前端据此提示「验证码错误」并刷新图片。
+        if (!captchaPassed(captchaId, captchaCode)) {
+            return LOGIN_CAPTCHA_REJECTED;
+        }
         int role = userService.loginSelect(username, password);
 
         // ⚠️ 只有认证成功（1 = 客户 / 2 = 商家 / 3 = 管理员）才继续；role = 0 时下面两步都不执行，
@@ -166,7 +204,9 @@ public class UserController {
             @RequestParam("username") String username,
             @RequestParam("password") String password
     ) {
-        return userService.getUserInfo(username, password);
+        // 2026-10-31：与 /user/me 用**同一把**掩码（AuthSessionSmokeTest 钉着两者除
+        // success/role 外逐键相等 —— 只掩一处那条断言会红）。
+        return DataMasking.maskProfileRow(userService.getUserInfo(username, password));
     }
 
     // 这是一个接口（用于更改前端用户的头像）
@@ -186,12 +226,9 @@ public class UserController {
             @RequestParam("address") String address,
             @RequestParam("selfintroduction") String selfintroduction
     ) {
-        // 块 7 收尾 · A5：邮箱 / 地址在商城端是**掩码展示**的 —— 把带 `*` 的掩码串原样提交
-        // 会把假值写进库，此后连真值都掩不回来。只拦这两个字段（密码 / 自我介绍里 `*` 合法）。
-        String maskedField = MaskedInput.firstMasked("email", email, "address", address);
-        if (maskedField != null) {
-            return Result.fail(MaskedInput.rejectMessage(maskedField));
-        }
+        // 块 7 收尾 · A5 的写侧拦截（2026-10-31 起**下沉到 UserService**）：掩码值仍一律拒绝，
+        // 但要先认出「这一格没改」的合法回显（入参 == 当前值的掩码）并用真值替换 ——
+        // 判定需要当前行，Controller 不碰 DAO，故判据只能留在 Service。
         return Result.of(userService.updateUserInfo(username, email, address, selfintroduction));
     }
 
@@ -266,7 +303,9 @@ public class UserController {
             return ResponseEntity.ok(Result.ok(roleOnly));
         }
 
-        Map<String, Object> userInfo = userService.meInfo(identity.userId());
+        // 2026-10-31「全局数据脱敏」：email / phone / address 答掩码（customerid / merchantid 不掩
+        // —— 它们是前端调业务接口的身份键，掩掉整页静默失效）。与 /user/getUserInfo 同一把掩码。
+        Map<String, Object> userInfo = DataMasking.maskProfileRow(userService.meInfo(identity.userId()));
         if (userInfo == null) {
             return ResponseEntity.ok(Result.fail("用户不存在"));
         }
@@ -439,6 +478,49 @@ public class UserController {
      * 的 javadoc 里）。⛔ 别把这里改成 {@code Result.fail} 图省事 —— 那样本端点的 401 与闸的 401
      * 就有了两套字节，而「客户端分不出这 401 是谁发的」是刻意的契约。
      */
+    // ============ 2026-10-31「上线前扫雷」：手机号登录 ============
+
+    /**
+     * 手机号 + 演示短信码（{@code 123456}）登录 —— 与 {@link #loginSelect} 同形：
+     * **成功才写会话**，返回裸 {@code int}（角色号 / 0 / 4），前端拿到后照旧打
+     * {@code /user/me} 与 {@code /user/token}。
+     *
+     * <p>⚠️ 不校验图形验证码：手机号路径本来就有「只有收到短信的人才知道 123456」这层
+     * 演示假设；把两套验证码叠在一起只会让演示多一步点错的机会。
+     *
+     * <p>⚠️ 未登录可达 ⇒ 必须在 {@code WebAuthConfig.AUTH_WHITELIST} 里（已登记）。
+     */
+    @PostMapping("/loginByPhone")
+    public int loginByPhone(
+            @RequestParam("phone") String phone,
+            @RequestParam("smsCode") String smsCode,
+            HttpServletRequest request
+    ) {
+        UserService.PhoneLoginResult result = userService.loginByPhone(phone, smsCode);
+        int role = result.role();
+        if (role == 1 || role == 2) {
+            String businessId = userService.businessId(result.username(), role);
+            if (businessId != null) {
+                AuthSession.login(request.getSession(), businessId, role);
+            }
+        }
+        return role;
+    }
+
+    /**
+     * 验证码闸：开关关（smoke / a3）⇒ 直接放行；开关开 ⇒ 必须验过。
+     *
+     * <p>⚠️ 开关开、但切片里取不到 {@link CaptchaService} 时**失败关闭**（返回 false）：
+     * 取不到 bean 是装配事故，默认放行等于把一道安全闸静默拆掉。
+     */
+    private boolean captchaPassed(String captchaId, String captchaCode) {
+        if (!captchaEnabled) {
+            return true;
+        }
+        CaptchaService captchaService = captchaServiceProvider.getIfAvailable();
+        return captchaService != null && captchaService.verifyAndConsume(captchaId, captchaCode);
+    }
+
     private static ResponseEntity<Object> unauthorized() {
         return ResponseEntity.status(HttpServletResponse.SC_UNAUTHORIZED)
                 .contentType(MediaType.parseMediaType("application/json;charset=UTF-8"))

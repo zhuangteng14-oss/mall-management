@@ -60,6 +60,29 @@ public class AdminLoginService {
     private final int failLimit;
     private final int lockMinutes;
 
+    /**
+     * 票存储后端（{@code redis} / {@code memory}），2026-10-31 起也决定**失败计数存哪**。
+     *
+     * <p>⚠️ 用字段注入（带初始值 {@code "redis"}）而不是构造器参数：本类的单测
+     * {@code AdminLoginServiceTest} 直接 {@code new AdminLoginService(..., 5, 15)}，
+     * 加构造器参数会让它编译不过；初始值保持「单测默认走 Redis」这条既有语义。
+     *
+     * <p>理由：dev / a3 / smoke 三个 profile 的 {@code app.auth.token-store=memory}，
+     * 本地没有 Redis。原先失败计数硬走 Redis ⇒ {@code assertNotLocked} 直接抛
+     * {@code RedisConnectionFailureException} ⇒ 管理员登录**恒 503**（fail-closed）。
+     * 本地演示要的是「管理员演示账号 100% 能进」（口令见 `_work/admin-pass`，不进仓），故在 memory 后端下把计数
+     * 同样放进程内；**默认 profile（redis）仍 fail-closed**，语义不变。
+     */
+    @Value("${app.auth.token-store:redis}")
+    private String tokenStore = "redis";
+
+    /** memory 后端下的失败计数（键同 Redis；条目带到期时刻）。 */
+    private final java.util.concurrent.ConcurrentHashMap<String, FailCounter> memoryFailures =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private record FailCounter(long count, long expiresAt) {
+    }
+
     public AdminLoginService(UserDao userDao,
                              UserService userService,
                              UserStateLookup userStateLookup,
@@ -170,7 +193,19 @@ public class AdminLoginService {
 
     // ==================== 失败计数 ====================
 
+    private boolean memoryMode() {
+        return "memory".equalsIgnoreCase(tokenStore);
+    }
+
     private void assertNotLocked(String key) {
+        if (memoryMode()) {
+            FailCounter counter = memoryFailures.get(key);
+            long now = System.currentTimeMillis();
+            if (counter != null && counter.expiresAt() >= now && counter.count() >= failLimit) {
+                throw locked(Math.max(1, (counter.expiresAt() - now + 999) / 1000));
+            }
+            return;
+        }
         try {
             String raw = redis.opsForValue().get(key);
             long count = parseCount(raw);
@@ -185,6 +220,22 @@ public class AdminLoginService {
     }
 
     private void onBadCredentials(String key) {
+        if (memoryMode()) {
+            long now = System.currentTimeMillis();
+            long lockMs = lockMinutes * 60_000L;
+            FailCounter counter = memoryFailures.compute(key, (k, old) -> {
+                long count = (old == null || old.expiresAt() < now) ? 1 : old.count() + 1;
+                long expiresAt = (count == 1 || count >= failLimit)
+                        ? now + lockMs
+                        : old.expiresAt();
+                return new FailCounter(count, expiresAt);
+            });
+            if (counter.count() >= failLimit) {
+                throw locked(lockMinutes * 60L);
+            }
+            throw new RejectedException(Reason.BAD_CREDENTIALS,
+                    "账号或密码不正确，还可尝试 " + (failLimit - counter.count()) + " 次", 0);
+        }
         try {
             Long incremented = redis.opsForValue().increment(key);
             long count = incremented == null ? 1L : incremented;
@@ -204,6 +255,10 @@ public class AdminLoginService {
     }
 
     private void clearFailures(String key) {
+        if (memoryMode()) {
+            memoryFailures.remove(key);
+            return;
+        }
         try {
             redis.delete(key);
         } catch (DataAccessException e) {

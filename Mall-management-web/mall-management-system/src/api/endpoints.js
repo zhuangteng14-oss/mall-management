@@ -584,4 +584,12 @@ export const endpoints = {
   chat: {
     ask: '/chat/ask',
   },
+  // 2026-10-31〈上线前扫雷〉：登录链的两条新端点（后端 CaptchaController / UserController.loginByPhone）。
+  // ⚠️ 同样追加在文件末尾 —— 本文件大量按行号互引，插入会整体漂移。
+  // · captcha：GET，未登录可达（白名单）。返回 { captchaId, image }（image 是 data URL）。
+  // · loginByPhone：POST 表单 phone + smsCode，返回裸角色号（1/2/0/4），与 loginSelect 同形。
+  auth: {
+    captcha: '/user/captcha',
+    loginByPhone: '/user/loginByPhone',
+  },
 }
